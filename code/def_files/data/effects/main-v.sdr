@@ -95,6 +95,7 @@ layout (std140) uniform modelData {
 
 	int sSpecmapIndex;
 	int sNormalmapIndex;
+	int sHeightmapIndex;
 	int sAmbientmapIndex;
 	int sMiscmapIndex;
 };

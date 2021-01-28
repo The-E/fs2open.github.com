@@ -1,4 +1,3 @@
-
 #include "shadows.sdr"
 #include "lighting.sdr"
 #include "gamma.sdr"
@@ -92,6 +91,7 @@ layout (std140) uniform modelData {
 
 	int sSpecmapIndex;
 	int sNormalmapIndex;
+	int sHeightmapIndex;
 	int sAmbientmapIndex;
 	int sMiscmapIndex;
 };
@@ -130,6 +130,9 @@ uniform samplerCube sEnvmap;
 #ifdef FLAG_NORMAL_MAP
 uniform sampler2DArray sNormalmap;
 #endif
+#ifdef FLAG_HEIGHT_MAP
+uniform sampler2DArray sHeightmap;
+#endif
 #ifdef FLAG_AMBIENT_MAP
 uniform sampler2DArray sAmbientmap;
 #endif
@@ -151,6 +154,206 @@ out vec4 fragOut1;
 out vec4 fragOut2;
 out vec4 fragOut3;
 out vec4 fragOut4;
+
+#ifdef FLAG_HEIGHT_MAP
+vec2 reliefParallaxMapping(in vec3 V, in vec2 T)
+{
+	float parallaxScale = 0.04f;
+	// determine required number of layers
+	const float minLayers = 10.0f;
+	const float maxLayers = 50.0f;
+	float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0, 0, 1), V)));
+
+	// height of each layer
+	float layerHeight = 1.0f / numLayers;
+	// depth of current layer
+	float currentLayerHeight = -1.0f;
+	// shift of texture coordinates for each iteration
+	vec2 dtex = parallaxScale * (V.xy / V.z) / (numLayers);
+	dtex *= 0.5f;
+
+	// current texture coordinates
+	vec2 currentTextureCoords = T + dtex * numLayers * 0.5f;
+	vec3 heightMapTextureCoords = vec3(currentTextureCoords, float(sHeightmapIndex));
+
+	// depth from heightmap
+	float heightFromTexture = 0.5f - texture(sHeightmap, heightMapTextureCoords).r;
+	int numSteps = int(numLayers);
+	bool found = false;
+
+	for(int i = 1; i < numSteps; ++i)
+	{
+		if(heightFromTexture < currentLayerHeight)
+		{
+			found = true;
+			break;
+		}
+
+		// go to the next layer
+		currentLayerHeight += layerHeight; 
+		// shift texture coordinates along V
+		currentTextureCoords -= dtex;
+
+		// new depth from heightmap
+		heightFromTexture = 0.5f - texture(sHeightmap, heightMapTextureCoords).r;
+	}
+
+	///////////////////////////////////////////////////////////
+	// Start of Relief Parallax Mapping
+
+	// decrease shift and height of layer by half
+	vec2 deltaTexCoord = dtex / 2;
+	float deltaHeight = layerHeight / 2;
+
+	// return to the mid point of previous layer
+	currentTextureCoords += deltaTexCoord;
+	currentLayerHeight -= deltaHeight;
+
+	// binary search to increase precision of Steep Paralax Mapping
+	const float minSearches = 10.0f;
+	const float maxSearches = 50.0f;
+	int numSearches = int(mix(maxSearches, minSearches, abs(dot(vec3(0, 0, 1), V))));
+
+	for(int i=0; i < numSearches; i++)
+	{
+		// decrease shift and height of layer by half
+		deltaTexCoord /= 2;
+		deltaHeight /= 2;
+
+		// new depth from heightmap
+		heightFromTexture = 0.5f - texture(sHeightmap, heightMapTextureCoords).r;
+
+		// shift along or agains vector V
+		if(heightFromTexture > currentLayerHeight) // below the surface
+		{
+			currentTextureCoords -= deltaTexCoord;
+			currentLayerHeight += deltaHeight;
+		}
+		else // above the surface
+		{
+			currentTextureCoords += deltaTexCoord;
+			currentLayerHeight -= deltaHeight;
+		}
+	}
+      
+	return currentTextureCoords;
+}
+
+vec2 parallaxMapping(in vec3 V, in vec2 T)//, out float parallaxHeight)
+{
+	float parallaxScale = 0.04f;
+	// determine optimal number of layers
+	const float minLayers = 10.0f;
+	const float maxLayers = 50.0f;
+	float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0, 0, 1), V)));
+
+	// height of each layer
+	float layerHeight = 1.0 / numLayers;
+	// current depth of the layer
+	float currentLayerHeight = -0.0f;
+	// shift of texture coordinates for each layer
+	vec2 dtex = parallaxScale * V.xy / V.z / numLayers;
+	dtex *= 0.5f;
+
+	// current texture coordinates
+	vec2 currentTextureCoords = T + dtex * numLayers * 0.5f;
+	vec3 heightMapTextureCoords = vec3(currentTextureCoords, float(sHeightmapIndex));
+
+	// depth from heightmap
+	float heightFromTexture = 0.5f - texture(sHeightmap, heightMapTextureCoords).r;
+	int numSteps = int(numLayers);
+	bool found = false;
+	int i = 0;
+
+	// while point is above the surface
+	for(int i = 1; i < numSteps; ++i)
+	{
+		if(heightFromTexture < currentLayerHeight)
+		{
+			found = true;
+			break;
+		}
+		
+		// go to the next layer
+		currentLayerHeight += layerHeight; 
+		// shift texture coordinates along V
+		currentTextureCoords -= dtex;
+
+		// new depth from heightmap
+		heightFromTexture = 0.5f - texture(sHeightmap, heightMapTextureCoords).r;
+	}
+
+	///////////////////////////////////////////////////////////
+
+	// previous texture coordinates
+	vec2 prevTCoords = currentTextureCoords;
+
+	// heights for linear interpolation
+	float nextH	= heightFromTexture - currentLayerHeight;
+	float prevH	= 0.5f - texture(sHeightmap, heightMapTextureCoords).r
+							- currentLayerHeight + layerHeight;
+
+	// proportions for linear interpolation
+	float weight = nextH / (nextH - prevH);
+
+	// interpolation of texture coordinates
+	vec2 finalTexCoords = prevTCoords * weight + currentTextureCoords * (1.0-weight);
+
+	// return result
+	return finalTexCoords;
+}
+
+#define HEIGHT_SCALE			0.01
+#define POM_NUM_STEPS_LINEAR			10
+#define POM_NUM_STEPS_LINEAR_MINUS_ONE		9	// POM_NUM_STEPS_LINEAR - 1
+#define POM_DIST_PER_STEP_LINEAR		0.1	// 1.0 / POM_NUM_STEPS_LINEAR
+#define POM_NUM_STEPS_BINARY			3
+
+vec2 kobrarOcclusionMap(vec2 texCoord, vec3 eyeDirTS) {
+	vec2 ddx = dFdx(texCoord * 512.0);
+  	vec2 ddy = dFdy(texCoord * 512.0);
+  	vec2 distRT = sqrt(ddx * ddx + ddy * ddy);
+ 	float miplev = log2(max(distRT.x,distRT.y));
+ 	//float miplev = log2( max( sqrt(dot(ddx, ddx)), sqrt(dot(ddy, ddy)) ) );
+  	
+  	vec2 Offset = texCoord;
+  	vec2 OffsetPS = POM_DIST_PER_STEP_LINEAR * HEIGHT_SCALE * eyeDirTS.xy;
+  	
+  	float hit = 0.0;
+  	float if_hit = 0.0;
+  	float rayDist = 1.0;
+  	float currHeight = 0.0;
+  	float if_first_hit;
+
+	vec3 heightmapTexCoord = vec3(Offset, sHeightmapIndex);
+  	
+  	for(int i = 0; i < POM_NUM_STEPS_LINEAR_MINUS_ONE ; ++i){
+	    	rayDist -= POM_DIST_PER_STEP_LINEAR;
+	    	Offset -= OffsetPS;
+	    	currHeight = texture(sHeightmap, heightmapTexCoord, miplev).g;
+	    	if_first_hit = clamp( ( currHeight - rayDist - if_hit ) * 9999999.0  ,0.0,1.0);
+	    	hit += if_first_hit * rayDist;
+	    	if_hit += if_first_hit;
+  	}
+  	
+  	//texCoord += -OffsetPS * (1.0-hit) * (POM_NUM_STEPS_LINEAR + 1.0) + OffsetPS;
+  	texCoord += OffsetPS * (hit + hit * POM_NUM_STEPS_LINEAR - POM_NUM_STEPS_LINEAR);
+	rayDist = hit + POM_DIST_PER_STEP_LINEAR;
+	if_hit = 0.0;
+	float rayPS = POM_DIST_PER_STEP_LINEAR; //it will get halved shortly anyway
+	
+	for(int i = 0; i < POM_NUM_STEPS_BINARY ; ++i){
+		rayDist += rayPS * (if_hit - 0.5); // if_hit - 0.5 is -0.5 or 0.5
+		rayPS *= 0.5;
+		texCoord += OffsetPS * (if_hit - 0.5); // if_hit - 0.5 is -0.5 or 0.5
+		OffsetPS *= 0.5;
+		currHeight = texture(sHeightmap, heightmapTexCoord, miplev).g;
+		if_hit = clamp( ( currHeight - rayDist ) * 9999999999.0  ,0.0,1.0);
+	} 
+
+	return texCoord + OffsetPS * ( if_hit * 0.5 );
+}
+#endif
 
 vec3 FresnelLazarovEnv(vec3 specColor, vec3 view, vec3 normal, float gloss)
 {
@@ -228,6 +431,15 @@ void main()
 	glossData = defaultGloss;
 #endif
 	vec2 aoFactors = vec2(1.0, 1.0);
+#ifdef FLAG_NORMAL_MAP
+  #ifdef FLAG_HEIGHT_MAP
+	vec3 tangentEyeDir = transpose(vertIn.tangentMatrix) * eyeDir;
+	//texCoord = parallaxMapping(tangentEyeDir, texCoord);
+	//texCoord = reliefParallaxMapping(tangentEyeDir, texCoord);
+	texCoord = kobrarOcclusionMap(texCoord, tangentEyeDir);
+  #endif
+#endif
+
 #ifdef	FLAG_AMBIENT_MAP
 	// red channel is ambient occlusion factor which only affects ambient lighting.
 	// green is cavity occlusion factor which only affects diffuse and specular lighting.

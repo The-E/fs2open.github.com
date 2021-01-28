@@ -19541,6 +19541,10 @@ void ship_render(object* obj, model_draw_list* scene)
 		debug_flags |= MR_DEBUG_NO_SPEC;
 	}
 
+	if (shipp->flags[Ship_Flags::Render_without_heightmap]) {
+		debug_flags |= MR_DEBUG_NO_HEIGHT;
+	}
+
 	render_info.set_flags(render_flags);
 	render_info.set_debug_flags(debug_flags);
 

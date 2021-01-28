@@ -145,6 +145,7 @@ struct model_uniform_data {
 	int sNormalmapIndex;
 	int sAmbientmapIndex;
 	int sMiscmapIndex;
+	int sHeightmapIndex;
 };
 
 enum class NanoVGShaderType: int32_t {

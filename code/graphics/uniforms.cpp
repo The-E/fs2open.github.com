@@ -199,6 +199,10 @@ void convert_model_material(model_uniform_data* data_out,
 		data_out->sMiscmapIndex = bm_get_array_index(material.get_texture_map(TM_MISC_TYPE));
 	}
 
+	if (shader_flags & SDR_FLAG_MODEL_HEIGHT_MAP) {
+		data_out->sHeightmapIndex = bm_get_array_index(material.get_texture_map(TM_HEIGHT_TYPE));
+	}
+
 	if (shader_flags & SDR_FLAG_MODEL_SHADOWS) {
 		data_out->shadow_mv_matrix = Shadow_view_matrix;
 
