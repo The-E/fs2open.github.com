@@ -511,7 +511,7 @@ namespace particle
 
 		if (render_batch)
 		{
-			batching_render_all();
+			//batching_render_all();
 		}
 	}
 
