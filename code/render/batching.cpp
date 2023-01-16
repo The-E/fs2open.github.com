@@ -26,6 +26,13 @@ void primitive_batch::add_triangle(batch_vertex* v0, batch_vertex* v1, batch_ver
 	Vertices.push_back(*v2);
 }
 
+void primitive_batch::add_quad(batch_vertex* v0, batch_vertex* v1, batch_vertex* v2, batch_vertex* v3)
+{
+	batch_vertex data[] = {*v0, *v1, *v2, *v0, *v2, *v3}; 
+	Vertices.insert(Vertices.end(), data, data + 6);
+}
+
+
 void primitive_batch::add_point_sprite(batch_vertex *p)
 {
 	Vertices.push_back(*p);
@@ -428,8 +435,7 @@ void batching_add_quad_internal(primitive_batch *batch, int texture, vertex *ver
 		v[i].tex_coord.xyz.z = (float)array_index;
 	}
 
-	batch->add_triangle(&v[0], &v[1], &v[2]);
-	batch->add_triangle(&v[0], &v[2], &v[3]);
+	batch->add_quad(&v[0], &v[1], &v[2], &v[3]);
 }
 
 void batching_add_tri_internal(primitive_batch *batch, int texture, vertex *verts)

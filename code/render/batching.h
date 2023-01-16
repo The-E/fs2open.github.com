@@ -81,6 +81,7 @@ public:
 	batch_info &get_render_info() { return render_info; }
 
 	void add_triangle(batch_vertex* v0, batch_vertex* v1, batch_vertex* v2);
+	void add_quad(batch_vertex* v0, batch_vertex* v1, batch_vertex* v2, batch_vertex* v3);
 	void add_point_sprite(batch_vertex *p);
 
 	size_t load_buffer(batch_vertex* buffer, size_t n_verts);
