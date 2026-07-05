@@ -214,8 +214,6 @@ enum shader_type {
 
 	SDR_TYPE_IRRADIANCE_MAP_GEN,
 
-	SDR_TYPE_SHADOW_MAP_GEN,
-
 	NUM_SHADER_TYPES
 };
 
@@ -243,8 +241,6 @@ enum shader_type {
 
 #define SDR_FLAG_ENV_MAP (1 << 0)
 
-#define SDR_FLAG_SHADOW_FALLBACK (1 << 0)
-
 
 enum class uniform_block_type {
 	Lights = 0,
@@ -256,8 +252,6 @@ enum class uniform_block_type {
 	Matrices = 6,
 	MovieData = 7,
 	GenericData = 8,
-	ShadowMapData = 9,
-	ShadowCascadeParams = 10,
 
 	NUM_BLOCK_TYPES
 };
@@ -268,7 +262,6 @@ struct vertex_format_data
 		POSITION4,
 		POSITION3,
 		POSITION2,
-		SCREEN_POS,
 		COLOR3,
 		COLOR4,
 		COLOR4F,
@@ -344,9 +337,10 @@ enum class gr_capability {
 	CAPABILITY_SEPARATE_BLEND_FUNCTIONS,
 	CAPABILITY_PERSISTENT_BUFFER_MAPPING,
 	CAPABILITY_BPTC,
+	CAPABILITY_S3TC,
 	CAPABILITY_LARGE_SHADER,
 	CAPABILITY_INSTANCED_RENDERING,
-	CAPABILITY_FAST_SHADOWS,
+	CAPABILITY_QUERIES_REUSABLE
 };
 
 struct gr_capability_def {
@@ -840,7 +834,7 @@ typedef struct screen {
 	std::function<void(int bitmap_handle, int bpp, const ubyte* data, int width, int height)> gf_update_texture;
 	std::function<void(void* data_out, int bitmap_num)> gf_get_bitmap_from_texture;
 
-	std::function<void(matrix4* shadow_view_matrix, const matrix* light_matrix, vec3d* eye_pos, bool first_pass)> gf_shadow_map_start;
+	std::function<void(matrix4* shadow_view_matrix, const matrix* light_matrix, vec3d* eye_pos)> gf_shadow_map_start;
 	std::function<void()> gf_shadow_map_end;
 
 	std::function<void()> gf_start_decal_pass;
@@ -850,9 +844,6 @@ typedef struct screen {
 	std::function<
 		void(model_material* material_info, indexed_vertex_source* vert_source, vertex_buffer* bufferp, size_t texi)>
 		gf_render_model;
-	std::function<void(gr_buffer_handle ubo_handle, size_t ubo_offset, size_t ubo_size,
-		vertex_buffer* buffer, indexed_vertex_source* vert_src, size_t texi)>
-		gf_render_shadow_draw;
 	std::function<void(shield_material* material_info,
 		primitive_type prim_type,
 		vertex_layout* layout,
@@ -942,6 +933,10 @@ typedef struct screen {
 	std::function<void(int x, int y, int width, int height)> gf_set_viewport;
 
 	std::function<void(bool set_override)> gf_override_fog;
+
+	// ImGui backend integration
+	std::function<void()> gf_imgui_new_frame;
+	std::function<void()> gf_imgui_render_draw_data;
 
 	//OpenXR functions
 	std::function<SCP_vector<const char*>()> gf_openxr_get_extensions;
@@ -1205,6 +1200,9 @@ inline void gr_post_process_restore_zbuffer()
 
 #define gr_override_fog					GR_CALL(gr_screen.gf_override_fog)
 
+#define gr_imgui_new_frame				GR_CALL(gr_screen.gf_imgui_new_frame)
+#define gr_imgui_render_draw_data		GR_CALL(gr_screen.gf_imgui_render_draw_data)
+
 inline void gr_render_primitives(material* material_info,
 	primitive_type prim_type,
 	vertex_layout* layout,
@@ -1270,12 +1268,6 @@ inline void gr_render_movie(movie_material* material_info,
 inline void gr_render_model(model_material* material_info, indexed_vertex_source *vert_source, vertex_buffer* bufferp, size_t texi)
 {
 	gr_screen.gf_render_model(material_info, vert_source, bufferp, texi);
-}
-
-inline void gr_render_shadow_draw(gr_buffer_handle ubo_handle, size_t ubo_offset, size_t ubo_size,
-                                   vertex_buffer* buffer, indexed_vertex_source* vert_src, size_t texi)
-{
-	gr_screen.gf_render_shadow_draw(ubo_handle, ubo_offset, ubo_size, buffer, vert_src, texi);
 }
 
 inline void gr_render_rocket_primitives(interface_material* material_info,
