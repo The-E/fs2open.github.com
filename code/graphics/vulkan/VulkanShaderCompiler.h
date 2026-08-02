@@ -35,7 +35,7 @@ public:
 	 * @brief Compile GLSL to SPIR-V with disk caching
 	 *
 	 * @param filename  GLSL source filename, e.g. "main.frag"
-	 * @param stage     Vertex or fragment
+	 * @param stage     Vertex, fragment, or compute
 	 * @param sdrType   Shader type (for variant flag lookup)
 	 * @param flags     SDR_FLAG_* bitmask — matching flags injected as #defines
 	 * @param requiresRaytracing  Whether this (sdrType, flags) combination uses

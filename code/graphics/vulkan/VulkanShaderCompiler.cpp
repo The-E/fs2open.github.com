@@ -285,6 +285,8 @@ SCP_vector<uint32_t> VulkanShaderCompiler::compile(const SCP_string& filename,
 	shaderc_shader_kind kind;
 	if (stage == vk::ShaderStageFlagBits::eVertex) {
 		kind = shaderc_vertex_shader;
+	} else if (stage == vk::ShaderStageFlagBits::eCompute) {
+		kind = shaderc_compute_shader;
 	} else {
 		kind = shaderc_fragment_shader;
 	}

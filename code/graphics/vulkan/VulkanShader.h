@@ -113,6 +113,12 @@ public:
 	 */
 	size_t getShaderCount() const { return m_shaders.size(); }
 
+	/**
+	 * @brief Get the runtime shaderc compiler, for subsystems compiling their
+	 * own shaders off the shader-type table (e.g. compute shaders)
+	 */
+	VulkanShaderCompiler* getCompiler() const { return m_compiler.get(); }
+
 private:
 	/**
 	 * @brief Load and compile a shader variant
