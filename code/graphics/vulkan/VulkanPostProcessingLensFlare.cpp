@@ -8,6 +8,8 @@
 #include "VulkanDescriptorManager.h"
 #include "VulkanTexture.h"
 #include "VulkanDeletionQueue.h"
+#include "VulkanBarrier.h"
+#include "VulkanHotspotFlareTypes.h"
 #include "graphics/2d.h"
 #include "graphics/grinternal.h"
 #include "graphics/lens_flare.h"
@@ -214,13 +216,29 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 		return;
 	}
 
-	// Whether there is anything to draw was decided by lens_flare_frame_update()
-	// during the scene render; this pass only draws what it published. In
-	// particular it must not second-guess the decision -- the sprite suns have
-	// already stepped aside for whatever is in here, so a backend that skipped a
-	// published draw would just delete the sun.
+	// No mounted lens: no flares at all, full stop -- neither the tracked
+	// sources below nor a hotspot has anywhere to draw a starburst.
+	const int lensIdx = graphics::lens_flare_active_lens();
+	if (lensIdx < 0) {
+		return;
+	}
+
+	// Whether there is anything tracked to draw was decided by
+	// lens_flare_frame_update() during the scene render; this pass only draws
+	// what it published, and must not second-guess the decision -- the
+	// sprite suns have already stepped aside for whatever is in here, so a
+	// backend that skipped a published draw would just delete the sun.
+	//
+	// An empty tracked-draw list is no longer "nothing to do": the hotspot
+	// pipeline may still have detected something this frame with no tracked
+	// source behind it at all -- in fact the common case once hotspots are
+	// active, since thrusters/beams stop publishing tracked draws entirely
+	// (see lens_flare_frame_update()). So the gate widens to "either kind has
+	// something to draw".
 	const auto& flareDraws = graphics::lens_flare_get_frame_draws();
-	if (flareDraws.empty()) {
+	const bool hotspotsActive = m_hotspot != nullptr && m_hotspot->isInitialized()
+		&& graphics::lens_flare_frame_hotspot_active();
+	if (flareDraws.empty() && !hotspotsActive) {
 		return;
 	}
 
@@ -231,8 +249,9 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 	}
 
 	// Uploaded before the render pass starts, since that path submits its own
-	// command buffer and waits
-	if (!ensureTextures(graphics::lens_flare_active_lens())) {
+	// command buffer and waits. Needed even with zero tracked draws: a
+	// hotspot-only frame still draws a starburst sampling this same texture.
+	if (!ensureTextures(lensIdx)) {
 		return;
 	}
 
@@ -256,27 +275,25 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 		return;
 	}
 
-	// Scene color: eShaderReadOnlyOptimal (after scene pass) -> eColorAttachmentOptimal
+	// Scene color: eShaderReadOnlyOptimal (after the scene pass, and after
+	// hotspot detection's compute read of it -- see
+	// VulkanPostProcessor::executeHotspotDetect(), called immediately before
+	// this) -> eColorAttachmentOptimal. Migrated to sync2 (this was the one
+	// remaining legacy vkCmdPipelineBarrier call in the Vulkan backend; see
+	// VulkanBarrier.h) so srcStage could widen to include the compute read
+	// without mixing barrier styles.
 	{
-		vk::ImageMemoryBarrier barrier;
-		barrier.srcAccessMask = vk::AccessFlagBits::eShaderRead;
-		barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead
-		                      | vk::AccessFlagBits::eColorAttachmentWrite;
+		ImageBarrier2 barrier;
+		barrier.image = m_sceneColor->image;
 		barrier.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 		barrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = m_sceneColor->image;
-		barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-		barrier.subresourceRange.baseMipLevel = 0;
-		barrier.subresourceRange.levelCount = 1;
-		barrier.subresourceRange.baseArrayLayer = 0;
-		barrier.subresourceRange.layerCount = 1;
-
-		cmd.pipelineBarrier(
-			vk::PipelineStageFlagBits::eFragmentShader,
-			vk::PipelineStageFlagBits::eColorAttachmentOutput,
-			{}, {}, {}, barrier);
+		barrier.srcStage = vk::PipelineStageFlagBits2::eFragmentShader
+		                  | vk::PipelineStageFlagBits2::eComputeShader;
+		barrier.srcAccess = vk::AccessFlagBits2::eShaderRead;
+		barrier.dstStage = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+		barrier.dstAccess = vk::AccessFlagBits2::eColorAttachmentRead
+		                   | vk::AccessFlagBits2::eColorAttachmentWrite;
+		cmdImageBarrier(cmd, barrier);
 	}
 
 	vk::PipelineLayout pipelineLayout = pipelineMgr->getPipelineLayout();
@@ -307,10 +324,16 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 	scissor.extent = m_ctx->sceneExtent;
 	cmd.setScissor(0, scissor);
 
-	// Set 1: Material -- the mounted lens's iris + starburst, shared by every sun,
-	// so this is written and bound once for the whole pass
+	// Set 1: Material -- the mounted lens's iris + starburst, shared by every
+	// sun and by the hotspot draw alike, so this is written and bound once
+	// for the whole pass. When hotspots are active this frame, its
+	// TransformSSBO binding (otherwise unused by SDR_TYPE_LENS_FLARE) doubles
+	// as this frame's hotspot results buffer -- conflict-free, since this
+	// Material set is freshly allocated every pass.
 	DescriptorWriter writer;
 	writer.reset(m_ctx->device, descriptorMgr->getFallbacks());
+
+	const uint32_t frameIndex = descriptorMgr->getCurrentFrame();
 
 	vk::DescriptorSet materialSet = descriptorMgr->allocateFrameSet(DescriptorSetIndex::Material);
 	Verify(materialSet);
@@ -321,11 +344,19 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 		texArrayInfos[0] = {m_ctx->linearSampler, m_apertureView, vk::ImageLayout::eShaderReadOnlyOptimal};
 		texArrayInfos[1] = {m_ctx->linearSampler, m_starburstView, vk::ImageLayout::eShaderReadOnlyOptimal};
 		writer.setImageArray(MaterialBinding::TextureArray, texArrayInfos);
+
+		if (hotspotsActive) {
+			writer.setBuffer(MaterialBinding::TransformSSBO,
+				{m_hotspot->getResultsBuffer(frameIndex), 0, VulkanHotspotFlare::getResultsBufferSize()});
+		}
 	}
+	// Flushed here rather than left to the per-source loop below: that loop
+	// may not run at all this frame (zero tracked draws, hotspots only), and
+	// this write must reach the device either way.
+	writer.flush();
 
 	// One draw per visible sun: they share the lens, but each has its own flare
 	// axis and tint, hence its own uniform block
-	const uint32_t frameIndex = descriptorMgr->getCurrentFrame();
 	for (size_t i = 0; i < flareDraws.size(); i++) {
 		if (m_ubo.cursor(frameIndex) >= m_ubo.slotsPerFrame()) {
 			// More flaring suns than the ring can hold this frame; drop the rest
@@ -351,6 +382,47 @@ void VulkanLensFlare::execute(vk::CommandBuffer cmd)
 			{materialSet, perDrawSet}, {});
 
 		cmd.draw(4, flareDraws[i].instances, 0, 0);
+	}
+
+	if (hotspotsActive) {
+		if (m_ubo.cursor(frameIndex) >= m_ubo.slotsPerFrame()) {
+			nprintf(("vulkan", "VulkanLensFlare: out of UBO slots, skipping hotspot draw\n"));
+		} else {
+			// Small enough (16 bytes) to ride the same per-frame UBO ring as
+			// the tracked sources above -- one more slot, not a new resource.
+			const graphics::lens_flare_tuning& tuning = graphics::lens_flare_get_tuning();
+			HotspotDrawParams params;
+			params.quadRadiusNdc = tuning.hotspot_quad_radius_ndc;
+			params.threshold = tuning.hotspot_threshold;
+			params.scale = tuning.hotspot_scale;
+			params.maxApparentRatio = graphics::lens_flare_max_apparent_ratio();
+
+			vk::DescriptorSet hotspotPerDrawSet = descriptorMgr->allocateFrameSet(DescriptorSetIndex::PerDraw);
+			Verify(hotspotPerDrawSet);
+			writer.writeSet(hotspotPerDrawSet, VulkanDescriptorManager::getSetTemplate(DescriptorSetIndex::PerDraw));
+			vk::DeviceSize slotOffset = m_ubo.alloc(frameIndex, &params, sizeof(params));
+			writer.setBuffer(PerDrawBinding::GenericData, {m_ubo.buffer(), slotOffset, m_ubo.slotSize()});
+			writer.flush();
+
+			// Starburst-only quad pipeline, same render pass as the tracked-source
+			// pipeline above (this pipeline is only ever compatible with m_renderPass,
+			// which only VulkanLensFlare knows -- VulkanHotspotFlare just draws with it).
+			PipelineConfig hotspotConfig;
+			hotspotConfig.shaderType = SDR_TYPE_LENS_FLARE_HOTSPOT;
+			hotspotConfig.shaderFlags = 0;
+			hotspotConfig.vertexLayoutHash = 0;
+			hotspotConfig.primitiveType = PRIM_TYPE_TRISTRIP;
+			hotspotConfig.depthMode = ZBUFFER_TYPE_NONE;
+			hotspotConfig.blendMode = ALPHA_BLEND_ADDITIVE;
+			hotspotConfig.cullEnabled = false;
+			hotspotConfig.depthWriteEnabled = false;
+			hotspotConfig.renderPass = m_renderPass;
+
+			vk::Pipeline hotspotPipeline = pipelineMgr->getPipeline(hotspotConfig, emptyLayout);
+			if (hotspotPipeline) {
+				m_hotspot->recordDraw(cmd, frameIndex, hotspotPipeline, pipelineLayout, materialSet, hotspotPerDrawSet);
+			}
+		}
 	}
 
 	cmd.endRenderPass();

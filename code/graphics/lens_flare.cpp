@@ -115,6 +115,13 @@ SCP_vector<lens_flare_draw> Frame_draws;
 // never disagree about which suns the starburst has taken over.
 SCP_vector<bool> Sun_starburst_drawn;
 
+// Snapshot of lens_flare_hotspot_pipeline_active(), taken once by
+// lens_flare_frame_update() and published alongside Frame_draws. The Vulkan
+// pass reads this (via lens_flare_frame_hotspot_active()) instead of the live
+// tuning state, so a lab toggle mid-frame can't make the draw side disagree
+// with the gathering decision already baked into Frame_draws.
+bool Frame_hotspot_active = false;
+
 // Lens the "flares are running through X" breadcrumb last reported. Logged from
 // the frame build rather than from lens_flare_switch_to(), because mission-info
 // scans (FRED opening a file dialog) mount lenses they never render with.
@@ -193,6 +200,7 @@ struct film_image {
 	float dist_mm = 0.0f;               // distance from the sensor centre
 	float theta = 0.0f;                 // matching paraxial field angle
 	float axis_x = 1.0f, axis_y = 0.0f; // unit direction the flare is strung along
+	float ndc_x = 0.0f, ndc_y = 0.0f;   // screen-space (NDC) position of the source's image
 };
 
 // Project a flare source onto the film gate, each kind the same way the thing it
@@ -227,6 +235,9 @@ bool project_source(const flare_source& src, const film_gate& gate, float efl, f
 
 	float sx = vex.screen.xyw.x / gate.clip_w * 2.0f - 1.0f;
 	float sy = 1.0f - vex.screen.xyw.y / gate.clip_h * 2.0f;
+
+	out->ndc_x = sx;
+	out->ndc_y = sy;
 
 	float smx = sx * gate.half_w;
 	float smy = sy * gate.half_h;
@@ -380,6 +391,7 @@ void lens_flare_close()
 	Frame_data.clear();
 	Frame_draws.clear();
 	Sun_starburst_drawn.clear();
+	Frame_hotspot_active = false;
 	Logged_lens = -2;
 
 	// As in lens_flare_reset_for_level(), and for the same reason: a scheduled
@@ -415,6 +427,13 @@ const lens_system* lens_flare_get_system(int lens_idx)
 }
 
 lens_flare_tuning& lens_flare_get_tuning() { return Tuning; }
+
+bool lens_flare_hotspot_pipeline_active()
+{
+	return gr_screen.mode == GraphicsAPI::Vulkan && Tuning.hotspot_enabled;
+}
+
+float lens_flare_max_apparent_ratio() { return Max_apparent_ratio; }
 
 // Extra multiplier applied to the whole flare so its brightness reads
 // consistently in SDR and HDR output without per-lens re-tuning. SDR is the
@@ -487,6 +506,11 @@ std::optional<int> lens_flare_get_lab_lens()
 const SCP_vector<lens_flare_draw>& lens_flare_get_frame_draws()
 {
 	return Frame_draws;
+}
+
+bool lens_flare_frame_hotspot_active()
+{
+	return Frame_hotspot_active;
 }
 
 bool lens_flare_sun_starburst_drawn(int sun_n)
@@ -732,6 +756,7 @@ void lens_flare_clear_frame()
 {
 	Frame_draws.clear();
 	Sun_starburst_drawn.clear();
+	Frame_hotspot_active = false;
 }
 
 bool lens_flare_point_visible(const vec3d& world_pos)
@@ -898,8 +923,23 @@ void lens_flare_frame_update()
 	// identical projection and packing below
 	SCP_vector<flare_source> sources;
 	gather_sun_sources(sources, dt, snap);
-	lens_flare_gather_thruster_sources(sources, MAX_THRUSTER_SOURCES);
-	lens_flare_gather_beam_sources(sources, MAX_BEAM_SOURCES);
+	// Once the GPU hotspot pipeline is active (Vulkan only), a bright nozzle or
+	// beam muzzle flares by being detected as a hotspot instead -- modeling it
+	// as a tracked source too would just draw it twice. Suns are unaffected:
+	// they keep their own physically-based flare regardless, so they alone
+	// still need the exclusion list the hotspot detector reads (see
+	// lens_flare_tuning::hotspot_exclusion_radius_ndc).
+	//
+	// Read once and published as Frame_hotspot_active below: the Vulkan draw
+	// side runs later, during post-processing, and must see this frame's
+	// decision rather than re-querying tuning that a lab toggle could have
+	// changed in between.
+	const bool hotspot_active = lens_flare_hotspot_pipeline_active();
+	Frame_hotspot_active = hotspot_active;
+	if (!hotspot_active) {
+		lens_flare_gather_thruster_sources(sources, MAX_THRUSTER_SOURCES);
+		lens_flare_gather_beam_sources(sources, MAX_BEAM_SOURCES);
+	}
 	if (sources.empty()) {
 		return;
 	}
@@ -950,6 +990,7 @@ void lens_flare_frame_update()
 		draw.visibility = src.visibility;
 		draw.off_axis_deg = image.theta * (180.0f / PI);
 		draw.output_scale = out_scale;
+		draw.source_ndc = { image.ndc_x, image.ndc_y };
 		Frame_draws.push_back(draw);
 
 		// This sun is committed, and pack_source_instances() reserves the starburst

@@ -332,6 +332,15 @@ bool VulkanPostProcessor::init(vk::Device device, vk::PhysicalDevice physDevice,
 		nprintf(("vulkan", "VulkanPostProcessor: Lens flare initialization failed (non-fatal)\n"));
 	}
 
+	// Initialize the GPU-driven hotspot lens flare pass (non-fatal if it
+	// fails; wired into m_lensFlare only on success, so a failure here just
+	// leaves the tracked-source pass drawing exactly as it always has)
+	if (!m_hotspot.init(m_ctx, m_sceneColor)) {
+		nprintf(("vulkan", "VulkanPostProcessor: Hotspot flare initialization failed (non-fatal)\n"));
+	} else {
+		m_lensFlare.setHotspotFlare(&m_hotspot);
+	}
+
 	// Initialize LDR targets for tonemapping + FXAA (non-fatal if it fails)
 	if (!m_ldr.init(m_ctx, m_sceneColor, m_sceneDepth, m_bloom)) {
 		nprintf(("vulkan", "VulkanPostProcessor: LDR target initialization failed (non-fatal)\n"));
@@ -381,6 +390,8 @@ void VulkanPostProcessor::shutdown()
 		shutdownGBuffer();
 		m_smaa.shutdown();
 		m_ldr.shutdown();
+		m_lensFlare.setHotspotFlare(nullptr);
+		m_hotspot.shutdown();
 		m_lensFlare.shutdown();
 		shutdownBloom();
 
@@ -567,6 +578,11 @@ bool VulkanPostProcessor::resize(vk::Extent2D newExtent)
 
 	nprintf(("vulkan", "VulkanPostProcessor: Resized to %ux%u\n", newExtent.width, newExtent.height));
 	return true;
+}
+
+void VulkanPostProcessor::executeHotspotDetect(vk::CommandBuffer cmd)
+{
+	m_hotspot.dispatch(cmd, getDescriptorManager()->getCurrentFrame());
 }
 
 void VulkanPostProcessor::copyEffectTexture(vk::CommandBuffer cmd) const

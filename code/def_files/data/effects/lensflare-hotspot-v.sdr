@@ -1,0 +1,57 @@
+// Vulkan-only. Starburst-only quad for a GPU-detected screen-space hotspot: a
+// bright pixel lensflare-hotspot-detect.sdr found, with no tracked
+// game-entity behind it. One quad per hotspot, no ghost train -- unlike the
+// tracked-source pass (lensflare-v.sdr/-f.sdr), a hotspot has no lens-ghost
+// geometry to speak of, only a starburst.
+
+// Keep in sync with MAX_HOTSPOTS in VulkanHotspotFlareTypes.h.
+#define MAX_HOTSPOTS 24
+
+// Mirrors HotspotCandidate in VulkanHotspotFlareTypes.h field for field.
+struct HotspotCandidate {
+	vec4 data; // x = ndc_x, y = ndc_y, z = luminance, w = unused pad
+};
+
+// Bound where the tracked-source pass binds its per-instance transform SSBO
+// (MaterialBinding::TransformSSBO, set 1 binding 3). VulkanLensFlare::
+// execute() allocates a fresh Material descriptor set every pass and this
+// pipeline is the only thing that ever reads this binding when it's used for
+// hotspots, so repurposing it for the detection results is conflict-free.
+// gl_InstanceIndex indexes candidates[] directly -- this struct already
+// matches HotspotResults field for field, counter header included, so no
+// manual offset math belongs in this shader.
+layout(std430, set = 1, binding = 3) readonly buffer HotspotResults {
+	uint count;
+	uint pad0, pad1, pad2;
+	HotspotCandidate candidates[MAX_HOTSPOTS];
+};
+
+// Mirrors HotspotDrawParams in VulkanHotspotFlareTypes.h. Written into
+// VulkanLensFlare's existing PerDraw UBO ring slot (set 2 binding 0) --  the
+// same binding the tracked-source pass uses for its much larger
+// lens_flare_data block -- rather than a push constant, so this pipeline
+// needs no pipeline-layout change of its own.
+layout(std140, set = 2, binding = 0) uniform genericData {
+	float quadRadiusNdc;
+	float threshold;
+	float scale;
+	float maxApparentRatio;
+};
+
+layout(location = 0) out vec2 quadPos; // -1..1 within the starburst quad
+layout(location = 1) flat out float g_luminance;
+
+void main()
+{
+	vec2 corner = vec2(float(gl_VertexIndex & 1), float((gl_VertexIndex >> 1) & 1)) * 2.0 - 1.0;
+
+	HotspotCandidate c = candidates[gl_InstanceIndex];
+
+	quadPos = corner;
+	g_luminance = c.data.z;
+
+	// Same Y-up sensor-space NDC lensflare-hotspot-detect.sdr writes (see its
+	// pixelToNdc()) and the negative-viewport-height convention
+	// VulkanLensFlare::execute() sets up to match lensflare-v.sdr.
+	gl_Position = vec4(c.data.xy + corner * quadRadiusNdc, 0.0, 1.0);
+}

@@ -235,6 +235,9 @@ void LabUi::build_lens_flare_options()
 	Separator();
 	build_thruster_flare_options();
 
+	Separator();
+	build_hotspot_flare_options();
+
 	// live pass state, refreshed every frame by lens_flare_frame_update():
 	// one entry per light source that got a draw
 	Separator();
@@ -341,4 +344,38 @@ void LabUi::build_thruster_flare_options()
 	TextDisabled("range a nozzle is a small fraction of that, which is why the");
 	TextDisabled("useful values are large. Brightness also follows throttle,");
 	TextDisabled("nozzle facing and distance, so it is never constant per ship.");
+}
+
+// GPU-driven "hotspot" flares: a fourth, untracked source that a Vulkan
+// compute pass detects directly in the rendered frame -- any sufficiently
+// bright pixel, with no game-entity model behind it. Vulkan-only: the
+// OpenGL backend has no compute-shader support to run this pipeline at all.
+void LabUi::build_hotspot_flare_options()
+{
+	auto& tuning = graphics::lens_flare_get_tuning();
+
+	if (gr_screen.mode != GraphicsAPI::Vulkan) {
+		TextDisabled("GPU hotspot flares: Vulkan only (current backend has no compute shaders)");
+		return;
+	}
+
+	Checkbox("Enable GPU hotspot flares", &tuning.hotspot_enabled);
+	TextDisabled("Detects any sufficiently bright pixel in the rendered frame and");
+	TextDisabled("flares it directly -- specular highlights and glints the engine");
+	TextDisabled("has no tracked source for. While this is on, thruster and beam");
+	TextDisabled("flares stop drawing as tracked sources: if they're bright enough");
+	TextDisabled("to flare, this pipeline finds them too, so drawing both would be");
+	TextDisabled("the same flare twice. Suns are unaffected.");
+
+	if (!tuning.hotspot_enabled) {
+		return;
+	}
+
+	SliderFloat("Hotspot threshold", &tuning.hotspot_threshold, 0.1f, 50.0f, "%.2f",
+		ImGuiSliderFlags_Logarithmic);
+	SliderFloat("Hotspot intensity scale", &tuning.hotspot_scale, 0.0f, 4.0f);
+	SliderFloat("Hotspot quad radius (NDC)", &tuning.hotspot_quad_radius_ndc, 0.0f, 0.5f, "%.3f");
+	SliderFloat("Sun exclusion radius (NDC)", &tuning.hotspot_exclusion_radius_ndc, 0.0f, 0.5f, "%.3f");
+	TextDisabled("Exclusion radius keeps a flaring sun from also spawning a");
+	TextDisabled("duplicate hotspot flare on top of itself.");
 }

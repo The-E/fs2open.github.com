@@ -1,0 +1,159 @@
+// Vulkan-only. GPU-driven "hotspot" flare detection: scans the rendered HDR
+// scene color for any sufficiently bright pixel -- a specular highlight, a
+// glint, a thruster nozzle or beam muzzle -- that the engine has no tracked
+// game-entity model for, and records its screen position for
+// lensflare-hotspot-v.sdr/-f.sdr to draw a starburst at. Runs once per frame,
+// before VulkanLensFlare's render pass, entirely GPU-resident: no CPU
+// readback, and the indirect-draw args this pass writes are consumed
+// directly by cmd.drawIndirect().
+//
+// One workgroup per 16x16 half-resolution tile (32x32 full-res pixels). Each
+// thread covers one half-res texel by reading the 2x2 full-res block under
+// it and taking the max-luminance texel of the four -- never averaged, and
+// never a plain half-res point-sample either: either would risk losing the
+// 1-2 pixel glint this pass exists to catch. A shared-memory tree reduction
+// then narrows the tile down to a single winning texel (strict argmax the
+// whole way: every step carries (luminance, ndc position) together, never
+// just a luminance), which is compared against the brightness threshold and,
+// if it clears it, atomically reserved a slot in the results buffer.
+//
+// No subgroup intrinsics: targets Vulkan 1.0 SPIR-V like the rest of the
+// shaders this engine compiles (see VulkanShaderCompiler's target-env
+// choice), so the reduction below uses only barrier() + shared memory.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Keep in sync with MAX_HOTSPOTS / MAX_HOTSPOT_EXCLUSIONS in
+// VulkanHotspotFlareTypes.h (same manual-sync convention as
+// lensflare-v.sdr's `instances[64]` <-> MAX_LENS_FLARE_INSTANCES).
+#define MAX_HOTSPOTS 24
+#define MAX_HOTSPOT_EXCLUSIONS 16
+
+layout(set = 0, binding = 0) uniform sampler2D sceneColor;
+
+// Mirrors HotspotCandidate/HotspotResults in VulkanHotspotFlareTypes.h field
+// for field. `count` is a pure atomic reservation counter here -- it may run
+// past MAX_HOTSPOTS under contention, which is fine, because only
+// indirectArgs.instanceCount below (clamped) is what the graphics pass
+// actually reads.
+struct HotspotCandidate {
+	vec4 data; // x = ndc_x, y = ndc_y, z = luminance, w = unused pad
+};
+layout(std430, set = 0, binding = 1) buffer HotspotResults {
+	uint count;
+	uint pad0, pad1, pad2;
+	HotspotCandidate candidates[MAX_HOTSPOTS];
+} results;
+
+// Mirrors HotspotIndirectArgs (field-for-field VkDrawIndirectCommand) in
+// VulkanHotspotFlareTypes.h. vertexCount/firstVertex/firstInstance are set by
+// the CPU once at buffer creation and never touched here; only
+// instanceCount is written, by atomically counting slots this pass actually
+// filled (so it never exceeds MAX_HOTSPOTS even though results.count above
+// might).
+layout(std430, set = 0, binding = 2) buffer HotspotIndirectArgs {
+	uint vertexCount;
+	uint instanceCount;
+	uint firstVertex;
+	uint firstInstance;
+} indirectArgs;
+
+// Mirrors HotspotExclusion/HotspotExclusionData in VulkanHotspotFlareTypes.h.
+// CPU-uploaded once per frame from this frame's tracked (sun) draws -- a
+// one-way write, not a readback -- so a sun doesn't also spawn a duplicate
+// hotspot flare on top of itself. Thrusters/beams don't need an entry here:
+// once this pipeline is active they stop publishing tracked draws entirely
+// (see lens_flare_frame_update()), so only suns ever appear.
+struct HotspotExclusion {
+	vec4 data; // x = ndc_x, y = ndc_y, z = radius_ndc, w = unused pad
+};
+layout(std140, set = 0, binding = 3) uniform HotspotExclusionData {
+	uint excludeCount;
+	uint excludePad0, excludePad1, excludePad2;
+	HotspotExclusion exclusions[MAX_HOTSPOT_EXCLUSIONS];
+};
+
+layout(push_constant) uniform HotspotDetectParams {
+	uvec2 sceneSize;  // full-resolution scene color dimensions
+	float threshold;  // luminance a tile winner must clear to become a hotspot
+};
+
+const uint TILE_THREADS = 256; // 16 * 16, must match local_size_x * local_size_y
+shared float s_luminance[TILE_THREADS];
+shared vec2  s_ndc[TILE_THREADS];
+
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+// Screen pixel (top-left origin, matching how the scene color image was
+// rendered -- see the negative-viewport-height note in
+// VulkanPostProcessingLensFlare.cpp) -> the same Y-up sensor-space NDC
+// lens_flare.cpp's project_source() computes for source_ndc, so a detected
+// hotspot and an excluded tracked source agree on where "the same point on
+// screen" is.
+vec2 pixelToNdc(vec2 pixel)
+{
+	vec2 ndc;
+	ndc.x = pixel.x / float(sceneSize.x) * 2.0 - 1.0;
+	ndc.y = 1.0 - pixel.y / float(sceneSize.y) * 2.0;
+	return ndc;
+}
+
+void main()
+{
+	uint localIndex = gl_LocalInvocationID.y * 16u + gl_LocalInvocationID.x;
+
+	ivec2 halfCoord = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 halfSize = ivec2((sceneSize + uvec2(1u)) / uvec2(2u));
+
+	float bestLum = -1.0;
+	vec2 bestNdc = vec2(0.0);
+
+	if (halfCoord.x < halfSize.x && halfCoord.y < halfSize.y) {
+		ivec2 baseFull = halfCoord * 2;
+		for (int dy = 0; dy < 2; ++dy) {
+			for (int dx = 0; dx < 2; ++dx) {
+				ivec2 full = min(baseFull + ivec2(dx, dy), ivec2(sceneSize) - 1);
+				vec3 c = texelFetch(sceneColor, full, 0).rgb;
+				float lum = luminance(c);
+				if (lum > bestLum) {
+					bestLum = lum;
+					bestNdc = pixelToNdc(vec2(full) + vec2(0.5));
+				}
+			}
+		}
+
+		// Per-thread exclusion test, before the tile reduction: an excluded
+		// candidate must not out-compete a legitimate neighbor within the
+		// same tile for the single winning slot.
+		for (uint i = 0u; i < excludeCount && i < MAX_HOTSPOT_EXCLUSIONS; ++i) {
+			vec2 c = exclusions[i].data.xy;
+			float r = exclusions[i].data.z;
+			if (distance(bestNdc, c) < r) {
+				bestLum = -1.0;
+				break;
+			}
+		}
+	}
+
+	s_luminance[localIndex] = bestLum;
+	s_ndc[localIndex] = bestNdc;
+	barrier();
+
+	for (uint stride = TILE_THREADS / 2u; stride > 0u; stride >>= 1u) {
+		if (localIndex < stride) {
+			if (s_luminance[localIndex + stride] > s_luminance[localIndex]) {
+				s_luminance[localIndex] = s_luminance[localIndex + stride];
+				s_ndc[localIndex] = s_ndc[localIndex + stride];
+			}
+		}
+		barrier();
+	}
+
+	if (localIndex == 0u && s_luminance[0] > threshold) {
+		uint idx = atomicAdd(results.count, 1u);
+		if (idx < MAX_HOTSPOTS) {
+			results.candidates[idx].data = vec4(s_ndc[0], s_luminance[0], 0.0);
+			atomicAdd(indirectArgs.instanceCount, 1u);
+		}
+	}
+}

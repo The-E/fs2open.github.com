@@ -119,6 +119,8 @@ static ShaderTypeInfo SHADER_TYPES[] = {
 
 	{ SDR_TYPE_LENS_FLARE, "lensflare-v.sdr", "lensflare-f.sdr", nullptr,
 		{ VATTRIB_POSITION }, "Physically-based lens flare", false },
+	{ SDR_TYPE_LENS_FLARE_HOTSPOT, "lensflare-hotspot-v.sdr", "lensflare-hotspot-f.sdr", nullptr,
+		{ VATTRIB_POSITION }, "GPU-detected hotspot lens flare", false },
 };
 // clang-format on
 

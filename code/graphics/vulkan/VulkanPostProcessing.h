@@ -4,6 +4,7 @@
 #include "VulkanMemory.h"
 #include "VulkanConstants.h"
 #include "VulkanPerFrameUbo.h"
+#include "VulkanHotspotFlareTypes.h"
 
 #include <array>
 #include <vulkan/vulkan.hpp>
@@ -12,6 +13,7 @@
 namespace graphics::vulkan {
 
 struct RenderTarget;
+class VulkanHotspotFlare;
 
 /**
  * @brief Shared drawing infrastructure for post-processing subsystems
@@ -323,6 +325,15 @@ public:
 
 	bool isInitialized() const { return m_initialized; }
 
+	/**
+	 * @brief Wire in the GPU-driven hotspot subsystem, once both are initialized
+	 *
+	 * Not owned: VulkanPostProcessor owns both and outlives this pointer.
+	 * Null (the default) is a normal, supported state -- hotspot init failure
+	 * is non-fatal, and execute() just draws tracked sources as before.
+	 */
+	void setHotspotFlare(VulkanHotspotFlare* hotspot) { m_hotspot = hotspot; }
+
 private:
 	bool createFramebuffer();
 
@@ -335,6 +346,7 @@ private:
 
 	PostProcessContext* m_ctx = nullptr;
 	const RenderTarget* m_sceneColor = nullptr;
+	VulkanHotspotFlare* m_hotspot = nullptr;
 
 	vk::RenderPass m_renderPass;      // Color-only RGBA16F, loadOp=eLoad (additive to scene)
 	vk::Framebuffer m_sceneColorFB;   // Scene color as attachment 0
@@ -354,6 +366,120 @@ private:
 	VulkanAllocation m_starburstAlloc;
 	int m_texLensIdx = -1;
 	unsigned int m_texGeneration = 0;
+
+	bool m_initialized = false;
+};
+
+/**
+ * @brief GPU-driven "hotspot" lens flare: detection (compute) + draw (indirect)
+ *
+ * Detects screen-space bright pixels the engine has no tracked game-entity
+ * model for (specular highlights, glints -- and, once active, nozzles/beam
+ * muzzles too, since VulkanLensFlare stops drawing those as tracked sources;
+ * see lens_flare_frame_update()) and draws a starburst at each one. Entirely
+ * GPU-resident: the compute pass writes results straight into an
+ * indirect-draw args buffer, consumed by cmd.drawIndirect() with no CPU
+ * readback in between.
+ *
+ * Two entry points, called from two different places for two different
+ * reasons: dispatch() (compute) runs from VulkanPostProcessor::
+ * executeHotspotDetect(), before VulkanLensFlare's render pass even opens,
+ * because it needs to sample scene color while it is still
+ * eShaderReadOnlyOptimal. recordDraw() (graphics) is instead called by
+ * VulkanLensFlare::execute() itself, from inside its already-open render
+ * pass, because only VulkanLensFlare owns the render pass and pipeline the
+ * hotspot draw must be compatible with.
+ *
+ * Owns a bespoke compute pipeline/descriptor-set layout of its own (nothing
+ * in the shared 3-tier graphics layout exposes a writable SSBO/indirect
+ * buffer from a compute stage) and per-frame-in-flight results/indirect-args/
+ * exclusion buffers (frame N's vertex read can still be in flight when frame
+ * N+1's compute dispatch is recorded, same reasoning as g_transformBuffers in
+ * VulkanDraw.cpp).
+ */
+class VulkanHotspotFlare {
+public:
+	/**
+	 * @brief Create the compute pipeline and per-frame-in-flight buffers
+	 * @param sceneColor Scene HDR color target to sample (must outlive this)
+	 */
+	bool init(PostProcessContext& ctx, const RenderTarget& sceneColor);
+	void shutdown();
+
+	bool isInitialized() const { return m_initialized; }
+
+	/**
+	 * @brief Detect this frame's hotspots (compute dispatch)
+	 *
+	 * No-op if hotspots are disabled (graphics::lens_flare_frame_hotspot_active())
+	 * or this subsystem failed to initialize. Must be called before
+	 * VulkanLensFlare::execute()'s scene-color barrier, while scene color is
+	 * still eShaderReadOnlyOptimal (the layout the scene render pass leaves
+	 * it in).
+	 *
+	 * @param cmd Active command buffer (must be outside a render pass)
+	 * @param frameIndex Current frame-in-flight index (selects the per-frame buffers)
+	 */
+	void dispatch(vk::CommandBuffer cmd, uint32_t frameIndex);
+
+	/**
+	 * @brief Draw this frame's detected hotspots (indirect draw)
+	 *
+	 * Called from inside VulkanLensFlare::execute()'s render pass, after its
+	 * own per-source loop. No-op if uninitialized, if dispatch() found
+	 * nothing this frame, or if the given pipeline is null (caller failed to
+	 * build one).
+	 *
+	 * @param cmd Active command buffer (must be inside VulkanLensFlare's render pass)
+	 * @param frameIndex Current frame-in-flight index (selects the per-frame buffers)
+	 * @param pipeline SDR_TYPE_LENS_FLARE_HOTSPOT pipeline, built by the caller
+	 *   against VulkanLensFlare's render pass (only it knows that render pass)
+	 * @param pipelineLayout The shared 3-tier pipeline layout (same one
+	 *   VulkanLensFlare's own tracked-source draws use)
+	 * @param materialSet Set 1 (Material) -- the mounted lens's iris/starburst
+	 *   textures, plus (when this is called) this frame's hotspot results SSBO
+	 *   at MaterialBinding::TransformSSBO
+	 * @param perDrawSet Set 2 (PerDraw) -- this draw's HotspotDrawParams
+	 */
+	void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, vk::Pipeline pipeline,
+		vk::PipelineLayout pipelineLayout, vk::DescriptorSet materialSet, vk::DescriptorSet perDrawSet);
+
+	/**
+	 * @brief This frame's hotspot results SSBO, to bind at MaterialBinding::TransformSSBO
+	 */
+	vk::Buffer getResultsBuffer(uint32_t frameIndex) const { return m_perFrame[frameIndex].results.buffer; }
+	static vk::DeviceSize getResultsBufferSize() { return sizeof(HotspotResults); }
+
+private:
+	bool createComputeDescriptorSetLayout();
+	bool createComputePipeline();
+	bool createPerFrameData();
+	void destroyPerFrameData();
+
+	struct BufferAlloc {
+		vk::Buffer buffer;
+		VulkanAllocation allocation;
+	};
+
+	bool createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, MemoryUsage memUsage, BufferAlloc& out);
+
+	struct PerFrameData {
+		BufferAlloc results;     // HotspotResults SSBO, compute-written, vertex-read
+		BufferAlloc indirectArgs; // HotspotIndirectArgs SSBO, compute-written, indirect-draw-read
+		BufferAlloc exclusion;   // HotspotExclusionData UBO, CPU-written every frame
+		vk::DescriptorSet computeSet; // Set 0, bound during dispatch()
+	};
+
+	PostProcessContext* m_ctx = nullptr;
+	const RenderTarget* m_sceneColor = nullptr;
+
+	vk::UniqueDescriptorSetLayout m_computeSetLayout;
+	vk::UniqueDescriptorPool m_computeDescriptorPool;
+	vk::UniquePipelineLayout m_computePipelineLayout;
+	vk::UniqueShaderModule m_computeShaderModule;
+	vk::UniquePipeline m_computePipeline;
+
+	std::array<PerFrameData, MAX_FRAMES_IN_FLIGHT> m_perFrame;
 
 	bool m_initialized = false;
 };
@@ -974,6 +1100,21 @@ public:
 	void executeBloom(vk::CommandBuffer cmd) { m_bloom.execute(cmd); }
 
 	/**
+	 * @brief Detect this frame's GPU-driven "hotspot" flares (compute dispatch)
+	 *
+	 * Called immediately before executeLensFlare(), while scene color is
+	 * still eShaderReadOnlyOptimal -- executeLensFlare()'s own barrier
+	 * transitions it away from that layout, so detection must sample it
+	 * first. No-op when hotspots are disabled (Vulkan-only feature; see
+	 * graphics::lens_flare_frame_hotspot_active()). Must be called outside
+	 * a render pass. Defined in VulkanPostProcessing.cpp (needs
+	 * VulkanDescriptorManager.h for the current frame index).
+	 *
+	 * @param cmd Active command buffer (must be outside a render pass)
+	 */
+	void executeHotspotDetect(vk::CommandBuffer cmd);
+
+	/**
 	 * @brief Execute the physically-based lens flare pass
 	 *
 	 * Called immediately before executeBloom() so the flare energy is bloomed
@@ -1267,6 +1408,9 @@ private:
 
 	// ---- Physically-based lens flares (self-contained subsystem) ----
 	VulkanLensFlare m_lensFlare;
+
+	// ---- GPU-driven hotspot lens flares (self-contained subsystem) ----
+	VulkanHotspotFlare m_hotspot;
 
 	// ---- LDR / FXAA / post-effects / lightshafts (self-contained subsystem) ----
 	VulkanLDR m_ldr;

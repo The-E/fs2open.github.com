@@ -1,0 +1,38 @@
+// Vulkan-only. Fragment half of the GPU-detected hotspot starburst quad --
+// see lensflare-hotspot-v.sdr and lensflare-hotspot-detect.sdr.
+
+layout(location = 0) in vec2 quadPos;
+layout(location = 1) flat in float g_luminance;
+
+layout(location = 0) out vec4 fragOut0;
+
+layout(set = 1, binding = 1) uniform sampler2D textures[16];
+#define starburstMap textures[1]
+
+// Mirrors HotspotDrawParams in VulkanHotspotFlareTypes.h; see
+// lensflare-hotspot-v.sdr for why this rides the PerDraw GenericData slot
+// rather than a push constant. Only the last three fields are read here --
+// declared in full anyway so both stages agree on the block layout byte for
+// byte, the same reason lensflare-f.sdr carries the full per-instance array
+// it never touches.
+layout(std140, set = 2, binding = 0) uniform genericData {
+	float quadRadiusNdc;
+	float threshold;
+	float scale;
+	float maxApparentRatio;
+};
+
+void main()
+{
+	vec3 starburst = texture(starburstMap, quadPos * 0.5 + 0.5).rgb;
+
+	// Hotspots have no solid angle, so the finite-source solid-angle
+	// calibration (lens_flare_apparent_ratio() in lens_flare_internal.h)
+	// doesn't apply -- this is a new, first-cut scheme instead: stops over
+	// threshold, log2'd so brightness reads perceptually, scaled by a tuned
+	// constant, and clamped to the same shared ceiling the finite-source path
+	// saturates at (maxApparentRatio == lens_flare_max_apparent_ratio()).
+	float apparentRatio = min(log2(max(g_luminance / threshold, 1.0)) * scale, maxApparentRatio);
+
+	fragOut0 = vec4(starburst * apparentRatio, 1.0);
+}

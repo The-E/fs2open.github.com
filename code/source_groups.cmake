@@ -252,6 +252,9 @@ add_file_folder("Default files\\\\data\\\\effects"
 	def_files/data/effects/gamma-correct-f.sdr
 	def_files/data/effects/irrmap-f.sdr
 	def_files/data/effects/lensflare-f.sdr
+	def_files/data/effects/lensflare-hotspot-detect.sdr
+	def_files/data/effects/lensflare-hotspot-f.sdr
+	def_files/data/effects/lensflare-hotspot-v.sdr
 	def_files/data/effects/lensflare-v.sdr
 	def_files/data/effects/lighting.sdr
 	def_files/data/effects/ls-f.sdr
@@ -619,6 +622,7 @@ if (FSO_BUILD_WITH_VULKAN)
 		graphics/vulkan/VulkanDraw.cpp
 		graphics/vulkan/VulkanDraw.h
 		graphics/vulkan/VulkanDrawAPI.cpp
+		graphics/vulkan/VulkanHotspotFlareTypes.h
 		graphics/vulkan/VulkanMemory.cpp
 		graphics/vulkan/VulkanMemory.h
 		graphics/vulkan/VulkanPerFrameUbo.cpp
@@ -629,6 +633,7 @@ if (FSO_BUILD_WITH_VULKAN)
 		graphics/vulkan/VulkanPostProcessing.h
 		graphics/vulkan/VulkanPostProcessingBloom.cpp
 		graphics/vulkan/VulkanPostProcessingLensFlare.cpp
+		graphics/vulkan/VulkanPostProcessingLensFlareHotspot.cpp
 		graphics/vulkan/VulkanPostProcessingCommon.cpp
 		graphics/vulkan/VulkanPostProcessingDistortion.cpp
 		graphics/vulkan/VulkanPostProcessingFog.cpp

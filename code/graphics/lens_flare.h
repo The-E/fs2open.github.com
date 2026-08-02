@@ -385,9 +385,53 @@ struct lens_flare_tuning {
 	// Exposed so the lab can turn them on and show what they cost and look like.
 	// Suns are unaffected and always draw theirs.
 	bool thruster_ghosts = false;
+
+	// Whether the GPU-driven "hotspot" pipeline (Vulkan-only, a compute shader
+	// detecting bright pixels the engine has no tracked source for) is on.
+	// Default false so every build is byte-for-byte unchanged until this is
+	// deliberately enabled. See lens_flare_hotspot_pipeline_active(), which
+	// also gates on the Vulkan backend.
+	bool hotspot_enabled = false;
+
+	// Luminance a detected tile's winning texel must clear to become a hotspot.
+	float hotspot_threshold = 4.0f;
+
+	// Multiplies the log2-stops-over-threshold curve a hotspot's apparent
+	// brightness is drawn with (see lens_flare_max_apparent_ratio()).
+	float hotspot_scale = 0.5f;
+
+	// Fixed on-screen radius (NDC) of a hotspot's starburst quad. Not
+	// luminance-derived: a hotspot has no physical size to derive one from.
+	float hotspot_quad_radius_ndc = 0.05f;
+
+	// Radius (NDC) around each tracked source's screen position that the
+	// detector ignores, so a sun doesn't also spawn a duplicate hotspot flare
+	// on top of itself. Thrusters/beams don't need this: when hotspots are
+	// active they stop publishing tracked draws at all (see
+	// lens_flare_frame_update()), so only suns ever appear in the exclusion list.
+	float hotspot_exclusion_radius_ndc = 0.03f;
 };
 
 lens_flare_tuning& lens_flare_get_tuning();
+
+// Whether the GPU hotspot pipeline is the active flare-detection path right
+// now (Vulkan backend + hotspot_enabled). This is a live query of current
+// tuning state -- lens_flare_frame_update() is its only caller, using it to
+// decide whether to suppress tracked thruster/beam gathering for the frame
+// currently being built. Anything downstream of that (the Vulkan lens-flare
+// pass, run later in the same frame during post-processing) must NOT call
+// this directly: the lab UI can flip hotspot_enabled between the two calls,
+// which would let the draw side disagree with what frame_update already
+// decided. Use lens_flare_frame_hotspot_active() instead.
+bool lens_flare_hotspot_pipeline_active();
+
+// The ceiling every finite tracked source's intensity is clamped against
+// (lens_flare_internal.h's Max_apparent_ratio, private to this module's
+// translation units). Exposed read-only so the Vulkan hotspot pass can reuse
+// the same ceiling for its own log2-stops-over-threshold curve without a
+// second, potentially-divergent constant -- hotspots have no solid angle, so
+// they cannot reuse the formula itself, only the bound it saturates at.
+float lens_flare_max_apparent_ratio();
 
 // ---- the camera lens ----
 //
@@ -478,6 +522,7 @@ struct lens_flare_draw {
 	float visibility = 0.0f;
 	float off_axis_deg = 0.0f; // paraxial field angle of the source
 	float output_scale = 1.0f; // SDR/HDR consistency multiplier applied this frame
+	vec2d source_ndc = {0.0f, 0.0f}; // screen-space (NDC) position, for the hotspot exclusion list
 };
 
 // Decide what the flare pass will draw this frame and publish it, once per scene
@@ -509,6 +554,13 @@ void lens_flare_clear_frame();
 // these, the sun renderer asks lens_flare_sun_starburst_drawn() about them, and
 // the lab reports on them.
 const SCP_vector<lens_flare_draw>& lens_flare_get_frame_draws();
+
+// Whether lens_flare_frame_update() decided the hotspot pipeline was active
+// for the frame it just built (a snapshot of lens_flare_hotspot_pipeline_active()
+// taken at that moment, alongside Frame_draws). The Vulkan pass reads this,
+// not the live query, so it can never disagree with the suppression decision
+// frame_update already made for the same frame.
+bool lens_flare_frame_hotspot_active();
 
 // ---- thruster flares ----
 //
