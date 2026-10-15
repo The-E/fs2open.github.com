@@ -149,6 +149,16 @@ struct model_uniform_data {
 	int flags;
 	float pad;
 
+	// scale of the contribution of each map; set by the .mat file of a model texture
+	float baseScalar;
+	float glowScalar;
+	float specScalar;
+	float normalScalar;
+
+	float ambientScalar;
+	float miscScalar;
+	float pad1[2];
+
 	// Only the Vulkan shaders declare these, and they're past the end of the OpenGL block.
 	matrix4 prevModelMatrix;
 	velocity_camera_data velocity;

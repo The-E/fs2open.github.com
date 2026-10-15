@@ -40,6 +40,7 @@
 #include "weapon/shockwave.h"
 
 #include <climits>
+#include <memory>
 
 
 // Some debug variables used externally for displaying stats
@@ -1885,6 +1886,7 @@ texture_info::texture_info(int bm_handle)
 void texture_info::clear()
 {
 	texture = original_texture = -1;
+	scalar = texture_scalar();
 	num_frames = 0;
 	total_time = 1.0f;
 }
@@ -1918,6 +1920,36 @@ int texture_info::LoadTexture(const char *filename, const char *dbg_name)
 
 	return texture;
 }
+// bmpman does not own the data of a bitmap that the engine creates in memory, so the engine keeps it here
+static SCP_unordered_map<int, std::unique_ptr<ubyte[]>> Color_texture_data;
+
+int texture_info::LoadColor(const vec3d &rgb, const char *dbg_name)
+{
+	constexpr int dim = 2;
+	auto data = std::make_unique<ubyte[]>(dim * dim * 4);
+
+	// the 32 bpp format of bmpman has the byte order blue, green, red, alpha
+	const ubyte r = (ubyte)fl2i(rgb.xyz.x * 255.0f + 0.5f);
+	const ubyte g = (ubyte)fl2i(rgb.xyz.y * 255.0f + 0.5f);
+	const ubyte b = (ubyte)fl2i(rgb.xyz.z * 255.0f + 0.5f);
+	for (int i = 0; i < dim * dim; i++) {
+		data[i * 4 + 0] = b;
+		data[i * 4 + 1] = g;
+		data[i * 4 + 2] = r;
+		data[i * 4 + 3] = 255;
+	}
+
+	this->original_texture = bm_create(32, dim, dim, data.get());
+	if (this->original_texture < 0) {
+		mprintf(("For \"%s\" I couldn't create a color texture\n", dbg_name));
+	} else {
+		Color_texture_data[this->original_texture] = std::move(data);
+	}
+	this->ResetTexture();
+
+	return texture;
+}
+
 void texture_info::PageIn()
 {
 	bm_page_in_texture(texture);
@@ -1927,7 +1959,10 @@ void texture_info::PageOut(bool release)
 {
 	if (texture >= 0) {
 		if (release) {
-			bm_release(texture);
+			int handle = texture;
+			bm_release(handle);
+			// the slot of the handle is free now, so the data of a color texture is not in use
+			Color_texture_data.erase(handle);
 			texture = -1;
 			num_frames = 0;
 			total_time = 1.0f;

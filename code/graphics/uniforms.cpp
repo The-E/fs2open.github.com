@@ -228,6 +228,14 @@ void convert_model_material(model_uniform_data* data_out,
 	if (material.is_alpha_mult_active()) {
 		data_out->alphaMult = material.get_alpha_mult();
 	}
+
+	// the specular map slot of the shader holds the reflectance map if there is one, or else the shine map
+	data_out->baseScalar = material.get_map_scalar(TM_BASE_TYPE);
+	data_out->glowScalar = material.get_map_scalar(TM_GLOW_TYPE);
+	data_out->specScalar = material.get_map_scalar(material.get_texture_map(TM_SPECULAR_TYPE) >= 0 ? TM_SPECULAR_TYPE : TM_SPEC_GLOSS_TYPE);
+	data_out->normalScalar = material.get_map_scalar(TM_NORMAL_TYPE);
+	data_out->ambientScalar = material.get_map_scalar(TM_AMBIENT_TYPE);
+	data_out->miscScalar = material.get_map_scalar(TM_MISC_TYPE);
 }
 
 void convert_shadow_material(shadow_uniform_data* data_out,

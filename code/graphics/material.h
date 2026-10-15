@@ -213,6 +213,8 @@ class model_material : public material
 	bool Use_alpha_mult = false;
 	float Alpha_mult = 1.0f;
 
+	float Map_scalars[TM_NUM_TYPES] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+
 public:
 	model_material();
 
@@ -272,6 +274,10 @@ public:
 	bool is_alpha_mult_active() const;
 	void set_alpha_mult(float alpha);
 	void reset_alpha_mult();
+
+	// scale of the contribution of one texture map; 1 leaves the map unchanged
+	float get_map_scalar(int tex_type) const { return Map_scalars[tex_type]; }
+	void set_map_scalar(int tex_type, float scalar) { Map_scalars[tex_type] = scalar; }
 
 };
 

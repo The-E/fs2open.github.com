@@ -1063,6 +1063,7 @@ void model_render_buffers(model_draw_list* scene, model_material *rendering_mate
 	}
 
 	int texture_maps[TM_NUM_TYPES] = { -1 };
+	float map_scalars[TM_NUM_TYPES];
 	size_t buffer_size = buffer->tex_buf.size();
 	const auto& replacement_textures = interp->get_replacement_textures();
 
@@ -1187,6 +1188,16 @@ void model_render_buffers(model_draw_list* scene, model_material *rendering_mate
 			alpha = forced_alpha;
 		}
 
+		// a .mat file can scale the contribution of each map over time; replaced and forced textures are not scaled
+		for (int type = 0; type < TM_NUM_TYPES; type++) {
+			bool replaced = replacement_textures != nullptr && (*replacement_textures)[rt_begin_index + type] >= 0;
+
+			if (texture_maps[type] >= 0 && !replaced && forced_texture == -2)
+				map_scalars[type] = tmap->textures[type].GetScalar().Evaluate(elapsed_time);
+			else
+				map_scalars[type] = 1.0f;
+		}
+
 		if ( (texture_maps[TM_BASE_TYPE] == -1) && !no_texturing && !(debug_flags & MR_DEBUG_NO_DIFFUSE) ) {
 			continue;
 		}
@@ -1240,6 +1251,9 @@ void model_render_buffers(model_draw_list* scene, model_material *rendering_mate
 			}
 
 			rendering_material->set_texture_map(TM_GLOW_TYPE,	texture_maps[TM_GLOW_TYPE]);
+			for (int type = 0; type < TM_NUM_TYPES; type++) {
+				rendering_material->set_map_scalar(type, map_scalars[type]);
+			}
 			rendering_material->set_texture_map(TM_SPECULAR_TYPE, texture_maps[TM_SPECULAR_TYPE]);
 			rendering_material->set_texture_map(TM_SPEC_GLOSS_TYPE, texture_maps[TM_SPEC_GLOSS_TYPE]);
 			rendering_material->set_texture_map(TM_NORMAL_TYPE, texture_maps[TM_NORMAL_TYPE]);

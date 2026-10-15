@@ -98,6 +98,17 @@ uniform modelData {
 	int sMiscmapIndex;
 	float alphaMult;
 	int flags;
+	float pad;
+
+	// scale of the contribution of each map; see model_uniform_data (uniform_structs.h)
+	float baseScalar;
+	float glowScalar;
+	float specScalar;
+	float normalScalar;
+
+	float ambientScalar;
+	float miscScalar;
+	vec2 pad1;
 
 #ifdef VULKAN
 	mat4 prevModelMatrix;
@@ -318,13 +329,14 @@ void main()
 	#prereplace IF_FLAG MODEL_SDR_FLAG_AMBIENT
 		// red channel is ambient occlusion factor which only affects ambient lighting.
 		// green is cavity occlusion factor which only affects diffuse and specular lighting.
-		aoFactors = texture(sAmbientmap, vec3(texCoord, float(sAmbientmapIndex))).xy;
+		aoFactors = mix(vec2(1.0), texture(sAmbientmap, vec3(texCoord, float(sAmbientmapIndex))).xy, ambientScalar);
 	#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_AMBIENT
 
 	#prereplace IF_FLAG MODEL_SDR_FLAG_NORMAL
 	   // Normal map - convert from DXT5nm
 	   vec2 normalSample;
 	   normal.rg = normalSample = (texture(sNormalmap, vec3(texCoord, float(sNormalmapIndex))).ag * 2.0) - 1.0;
+	   normal.rg *= normalScalar;
 	   normal.b = clamp(sqrt(1.0 - dot(normal.rg, normal.rg)), 0.0001, 1.0);
 	   normal = vertIn.tangentMatrix * normal;
 	   float norm = length(normal);
@@ -352,6 +364,8 @@ void main()
 		#prereplace IF_FLAG MODEL_SDR_FLAG_HDR
 			baseColor.rgb = srgb_to_linear(baseColor.rgb);
 		#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_HDR
+
+		baseColor.rgb *= baseScalar;
 
 		#prereplace IF_NOT_FLAG MODEL_SDR_FLAG_LIGHT
 			// unlit draws carry their fade in the material colour, see model_render_determine_color()
@@ -382,6 +396,7 @@ void main()
 	// Specular map
 	#prereplace IF_FLAG MODEL_SDR_FLAG_SPEC
 		specColor = texture(sSpecmap, vec3(texCoord, float(sSpecmapIndex)));
+		specColor.rgb *= specScalar;
 		#prereplace IF_FLAG MODEL_SDR_FLAG_ALPHA_MULT
 			specColor *= alphaMult;
 		#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_ALPHA_MULT
@@ -406,7 +421,7 @@ void main()
 	// Misc map / team colors
 	#prereplace IF_FLAG MODEL_SDR_FLAG_MISC
 		#prereplace IF_FLAG MODEL_SDR_FLAG_TEAMCOLOR
-			teamMask = texture(sMiscmap, vec3(texCoord, float(sMiscmapIndex)));
+			teamMask = texture(sMiscmap, vec3(texCoord, float(sMiscmapIndex))) * miscScalar;
 
 			//For team colors applied to a diffuse or spec map, we assume that the base color of the diffuse
 			//at this point is vec3(0.5). To get accurate results, we subtract 0.5 from the team colors
@@ -464,7 +479,7 @@ void main()
 		#prereplace IF_FLAG MODEL_SDR_FLAG_HDR
 			glowColor = srgb_to_linear(glowColor) * GLOW_MAP_SRGB_MULTIPLIER;
 		#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_HDR
-		emissiveColor.rgb += glowColor * GLOW_MAP_INTENSITY;
+		emissiveColor.rgb += glowColor * GLOW_MAP_INTENSITY * glowScalar;
 	#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_GLOW
 
 	#prereplace IF_FLAG MODEL_SDR_FLAG_ALPHA_MULT

@@ -90,6 +90,17 @@ layout (std140) uniform modelData {
 	float alphaMult;
 
 	int flags;
+	float pad;
+
+	// scale of the contribution of each map; see model_uniform_data (uniform_structs.h)
+	float baseScalar;
+	float glowScalar;
+	float specScalar;
+	float normalScalar;
+
+	float ambientScalar;
+	float miscScalar;
+	vec2 pad1;
 };
 
 in VertexOutput {

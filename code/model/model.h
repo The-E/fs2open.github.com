@@ -783,12 +783,35 @@ typedef struct insignia {
 #define PM_FLAG_BATCHED					(1<<3)					// this model can be batch rendered
 #define PM_FLAG_HAS_INTRINSIC_MOTION	(1<<4)					// whether this model has an intrinsic rotation or translation submodel somewhere
 
+// A scalar that changes with time. A texture slot uses it to scale its contribution when the model is drawn.
+struct texture_scalar {
+	enum class Type { None, Sine };
+
+	Type type = Type::None;
+	float period = 1.0f;	// in seconds; used by Sine
+
+	// the value is in the range 0 to 1; elapsed_ms is in milliseconds
+	float Evaluate(int elapsed_ms) const
+	{
+		switch (type) {
+		case Type::Sine: {
+			// a period of zero or less is rejected when the .mat file is parsed
+			float phase = fmodf(elapsed_ms / (period * 1000.0f), 1.0f);
+			return 0.5f + 0.5f * sinf(phase * PI2);
+		}
+		default:
+			return 1.0f;
+		}
+	}
+};
+
 // Goober5000
 class texture_info
 {
 private:
 	int original_texture;	// what gets read in from file
 	int texture;			// what texture you draw with; reset to original_textures by model_set_instance
+	texture_scalar scalar;	// optional change over time of this slot, set by a .mat file
 
 	//WMC - Removed unneeded struct and is_anim to clean this up.
 	//If num_frames is < 2, it doesn't need to be treated like an animation.
@@ -800,12 +823,18 @@ public:
 	texture_info(int bm_handle);
 	void clear();
 
+	void SetScalar(const texture_scalar &s) { scalar = s; }
+	const texture_scalar &GetScalar() const { return scalar; }
+
 	int GetNumFrames() const;
 	int GetOriginalTexture() const;
 	int GetTexture() const;
 	float GetTotalTime() const;
 
 	int LoadTexture(const char *filename, const char *dbg_name = "<UNKNOWN>");
+
+	// create a 2x2 texture of one color in memory; rgb is in the range 0 to 1
+	int LoadColor(const vec3d &rgb, const char *dbg_name = "<UNKNOWN>");
 
 	void PageIn();
 	void PageOut(bool release);

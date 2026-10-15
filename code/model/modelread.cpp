@@ -3252,12 +3252,21 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	if (mat != nullptr)
 		tmap->mat_name = mat->name;
 
+	// load a slot of a .mat file: a single color becomes an in-memory texture, a file name loads an image
+	auto load_slot = [&](const texture_material_slot &slot, texture_info *ti) {
+		if (slot.has_color)
+			ti->LoadColor(slot.color, pm->filename);
+		else if (!slot.file.empty())
+			ti->LoadTexture(slot.file.c_str(), pm->filename);
+
+		ti->SetScalar(slot.scalar);
+	};
+
 	// load one optional map, either from the .mat file or by appending the suffix to the model's texture name
 	auto load_map = [&](int type, texture_info *ti) {
 		if (mat != nullptr) {
 			ti->clear();
-			if (!mat->maps[type].empty())
-				ti->LoadTexture(mat->maps[type].c_str(), pm->filename);
+			load_slot(mat->maps[type], ti);
 			return;
 		}
 
@@ -3294,8 +3303,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 		}
 
 		if (mat != nullptr) {
-			if (!mat->maps[TM_BASE_TYPE].empty())
-				tbase->LoadTexture(mat->maps[TM_BASE_TYPE].c_str(), pm->filename);
+			load_slot(mat->maps[TM_BASE_TYPE], tbase);
 		} else {
 			tbase->LoadTexture(tmp_name, pm->filename);
 		}
