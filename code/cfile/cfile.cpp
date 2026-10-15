@@ -52,7 +52,7 @@ cf_pathtype Pathtypes[CF_MAX_PATH_TYPES]  = {
 	// Root must be index 1!!
 	{ CF_TYPE_ROOT,					"",																			".mve .ogg",						CF_TYPE_ROOT	},
 	{ CF_TYPE_DATA,					"data",																		".cfg .txt",						CF_TYPE_ROOT	},
-	{ CF_TYPE_MAPS,					"data" DIR_SEPARATOR_STR "maps",											".pcx .ani .eff .tga .jpg .png .dds .ktx",	CF_TYPE_DATA	},
+	{ CF_TYPE_MAPS,					"data" DIR_SEPARATOR_STR "maps",											".pcx .ani .eff .tga .jpg .png .dds .ktx .mat",	CF_TYPE_DATA	},
 	{ CF_TYPE_TEXT,					"data" DIR_SEPARATOR_STR "text",											".txt .net",						CF_TYPE_DATA	},
 	{ CF_TYPE_MODELS,				"data" DIR_SEPARATOR_STR "models",											".pof",								CF_TYPE_DATA	},
 	{ CF_TYPE_TABLES,				"data" DIR_SEPARATOR_STR "tables",											".tbl .tbm .lua",						CF_TYPE_DATA	},

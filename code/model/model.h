@@ -824,6 +824,9 @@ public:
 	bool is_ambient;
 	bool is_transparent;
 
+	// name of the .mat file that defined these textures; empty if the textures came from the suffix search
+	SCP_string mat_name;
+
 	int FindTexture(int bm_handle);
 	int FindTexture(const char* name);
 

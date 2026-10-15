@@ -983,6 +983,8 @@ add_file_folder("Model"
 	model/modelrender.h
 	model/modelrender.cpp
 	model/modelreplace.h
+	model/modelmaterial.cpp
+	model/modelmaterial.h
 	model/modelreplace.cpp
 	model/modelsinc.h
 	model/model_flags.h

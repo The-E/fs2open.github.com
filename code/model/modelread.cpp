@@ -32,6 +32,7 @@
 #include "math/vecmat.h"
 #include "model/model.h"
 #include "model/modelinterp.h"
+#include "model/modelmaterial.h"
 #include "model/modelrender.h"
 #include "model/modelreplace.h"
 #include "model/modelsinc.h"
@@ -445,6 +446,8 @@ void model_init()
 	for (i=0;i<MAX_POLYGON_MODELS;i++) {
 		Polygon_models[i] = NULL;
 	}
+
+	texture_material_init();
 
 	model_initted = 1;
 }
@@ -3244,6 +3247,28 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	texture_map *tmap = &pm->maps[i];
 	tmap->Clear();
 
+	// a .mat file for this name replaces the suffix search; empty slots in it stay empty
+	const texture_material_def *mat = texture_material_find(tmp_name);
+	if (mat != nullptr)
+		tmap->mat_name = mat->name;
+
+	// load one optional map, either from the .mat file or by appending the suffix to the model's texture name
+	auto load_map = [&](int type, texture_info *ti) {
+		if (mat != nullptr) {
+			ti->clear();
+			if (!mat->maps[type].empty())
+				ti->LoadTexture(mat->maps[type].c_str(), pm->filename);
+			return;
+		}
+
+		char map_name[MAX_FILENAME_LEN];
+		strcpy_s(map_name, file);
+		strcat_s(map_name, MODEL_TEXTURE_SUFFIXES.at(type).c_str());
+		strlwr(map_name);
+
+		ti->LoadTexture(map_name, pm->filename);
+	};
+
 	//WMC - IMPORTANT!!
 	//The Fred_running checks are there so that FRED will see those textures and put them in the
 	//texture replacement box.
@@ -3268,7 +3293,12 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 			tmap->is_ambient = true;
 		}
 
-		tbase->LoadTexture(tmp_name, pm->filename);
+		if (mat != nullptr) {
+			if (!mat->maps[TM_BASE_TYPE].empty())
+				tbase->LoadTexture(mat->maps[TM_BASE_TYPE].c_str(), pm->filename);
+		} else {
+			tbase->LoadTexture(tmp_name, pm->filename);
+		}
 		
 		if ( tbase->GetTexture() < 0 ) {
 			Warning(LOCATION, "Couldn't open texture '%s'\nreferenced by model '%s'\n", tmp_name, pm->filename);
@@ -3284,11 +3314,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	}
 	else
 	{
-		strcpy_s(tmp_name, file);
-		strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_GLOW_TYPE).c_str());
-		strlwr(tmp_name);
-
-		tglow->LoadTexture(tmp_name, pm->filename);
+		load_map(TM_GLOW_TYPE, tglow);
 	}
 	// -------------------------------------------------------------------------
 
@@ -3303,18 +3329,10 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	else
 	{
 		// look for reflectance map
-		strcpy_s(tmp_name, file);
-		strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_SPEC_GLOSS_TYPE).c_str());
-		strlwr(tmp_name);
-
-		tspecgloss->LoadTexture(tmp_name, pm->filename);
+		load_map(TM_SPEC_GLOSS_TYPE, tspecgloss);
 
 		// look for a legacy shine map as well
-		strcpy_s(tmp_name, file);
-		strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_SPECULAR_TYPE).c_str());
-		strlwr(tmp_name);
-
-		tspec->LoadTexture(tmp_name, pm->filename);
+		load_map(TM_SPECULAR_TYPE, tspec);
 	}
 	//tmap->spec_map.original_texture = tmap->spec_map.texture;
 	// -------------------------------------------------------------------------
@@ -3324,11 +3342,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	if ( (!Cmdline_normal && !Fred_running) || (tbase->GetTexture() < 0) ) {
 		tnorm->clear();
 	} else {
-		strcpy_s(tmp_name, file);
-		strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_NORMAL_TYPE).c_str());
-		strlwr(tmp_name);
-
-		tnorm->LoadTexture(tmp_name, pm->filename);
+		load_map(TM_NORMAL_TYPE, tnorm);
 	}
 
 	// try to get a height map too
@@ -3336,30 +3350,18 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	if ((!Cmdline_height && !Fred_running) || (tbase->GetTexture() < 0)) {
 		theight->clear();
 	} else {
-		strcpy_s(tmp_name, file);
-		strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_HEIGHT_TYPE).c_str());
-		strlwr(tmp_name);
-
-		theight->LoadTexture(tmp_name, pm->filename);
+		load_map(TM_HEIGHT_TYPE, theight);
 	}
 
 	// ambient occlusion maps
 	texture_info *tambient = &tmap->textures[TM_AMBIENT_TYPE];
 
-	strcpy_s(tmp_name, file);
-	strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_AMBIENT_TYPE).c_str());
-	strlwr(tmp_name);
-
-	tambient->LoadTexture(tmp_name, pm->filename);
+	load_map(TM_AMBIENT_TYPE, tambient);
 
 	// Utility map -------------------------------------------------------------
 	texture_info *tmisc = &tmap->textures[TM_MISC_TYPE];
 
-	strcpy_s(tmp_name, file);
-	strcat_s(tmp_name, MODEL_TEXTURE_SUFFIXES.at(TM_MISC_TYPE).c_str());
-	strlwr(tmp_name);
-
-	tmisc->LoadTexture(tmp_name, pm->filename);
+	load_map(TM_MISC_TYPE, tmisc);
 
 	// -------------------------------------------------------------------------
 

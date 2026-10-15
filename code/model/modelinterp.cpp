@@ -1994,6 +1994,11 @@ int texture_map::FindTexture(const char* fname)
 			return i;
 		}
 	}
+
+	// no map has this file name, so the name may be the .mat name; that stands for the diffuse map
+	if (!this->mat_name.empty() && !stricmp(this->mat_name.c_str(), fname)) {
+		return TM_BASE_TYPE;
+	}
 	return -1;
 }
 
@@ -2013,6 +2018,7 @@ void texture_map::Clear()
 {
 	is_ambient = false;
 	is_transparent = false;
+	mat_name.clear();
 
 	for(int i = 0; i < TM_NUM_TYPES; i++)
 		this->textures[i].clear();
