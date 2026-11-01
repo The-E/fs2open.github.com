@@ -124,7 +124,8 @@ uniform modelData {
 
 	float ambientScalar;
 	float miscScalar;
-	vec2 pad1;
+	float glowIntensity;
+	float glowSrgbMultiplier;
 
 #ifdef VULKAN
 	mat4 prevModelMatrix;

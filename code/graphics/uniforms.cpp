@@ -236,6 +236,8 @@ void convert_model_material(model_uniform_data* data_out,
 	data_out->normalScalar = material.get_map_scalar(TM_NORMAL_TYPE);
 	data_out->ambientScalar = material.get_map_scalar(TM_AMBIENT_TYPE);
 	data_out->miscScalar = material.get_map_scalar(TM_MISC_TYPE);
+	data_out->glowIntensity = material.get_glow_intensity();
+	data_out->glowSrgbMultiplier = material.get_glow_srgb_multiplier();
 }
 
 void convert_shadow_material(shadow_uniform_data* data_out,

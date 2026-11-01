@@ -210,6 +210,12 @@ struct texture_scalar {
 	}
 };
 
+// Settings of the glow map of a texture. The defaults are the values that the model shader used before materials.
+struct texture_glow_params {
+	float intensity = 1.5f;				// scale of the glow color
+	float srgb_multiplier = 3.0f;		// scale after the conversion from sRGB, only in HDR rendering
+};
+
 // Goober5000 - since we need something < 0
 #define REPLACE_WITH_INVISIBLE	-47
 
@@ -221,6 +227,9 @@ class model_texture_replace : public std::array<int, MAX_REPLACEMENT_TEXTURES> {
 public:
 	// the optional change over time of each replacement map, set when a material replaces the map
 	std::array<texture_scalar, MAX_REPLACEMENT_TEXTURES> scalars;
+
+	// the glow settings of each replacement map; only the glow slot of a texture uses them
+	std::array<texture_glow_params, MAX_REPLACEMENT_TEXTURES> glow_params;
 
 	model_texture_replace() : std::array<int, MAX_REPLACEMENT_TEXTURES>() {
 		for (int& tex : *this)
@@ -830,6 +839,7 @@ private:
 	int original_texture;	// what gets read in from file
 	int texture;			// what texture you draw with; reset to original_textures by model_set_instance
 	texture_scalar scalar;	// optional change over time of this slot, set by a .mat file
+	texture_glow_params glow_params;	// settings of the glow map, set by a .mat file
 
 	//WMC - Removed unneeded struct and is_anim to clean this up.
 	//If num_frames is < 2, it doesn't need to be treated like an animation.
@@ -843,6 +853,8 @@ public:
 
 	void SetScalar(const texture_scalar &s) { scalar = s; }
 	const texture_scalar &GetScalar() const { return scalar; }
+	void SetGlowParams(const texture_glow_params &p) { glow_params = p; }
+	const texture_glow_params &GetGlowParams() const { return glow_params; }
 
 	int GetNumFrames() const;
 	int GetOriginalTexture() const;

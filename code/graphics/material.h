@@ -215,6 +215,9 @@ class model_material : public material
 
 	float Map_scalars[TM_NUM_TYPES] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
+	float Glow_intensity = 1.5f;
+	float Glow_srgb_multiplier = 3.0f;
+
 public:
 	model_material();
 
@@ -278,6 +281,11 @@ public:
 	// scale of the contribution of one texture map; 1 leaves the map unchanged
 	float get_map_scalar(int tex_type) const { return Map_scalars[tex_type]; }
 	void set_map_scalar(int tex_type, float scalar) { Map_scalars[tex_type] = scalar; }
+
+	// settings of the glow map; the defaults are the values that the shader had before materials
+	float get_glow_intensity() const { return Glow_intensity; }
+	float get_glow_srgb_multiplier() const { return Glow_srgb_multiplier; }
+	void set_glow_params(float intensity, float srgb_multiplier) { Glow_intensity = intensity; Glow_srgb_multiplier = srgb_multiplier; }
 
 };
 

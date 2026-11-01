@@ -89,6 +89,7 @@ ADE_INDEXER(l_ModelInstanceTextures, "number/string IndexOrTextureFilename", "Ar
 		if (tdx != nullptr) {
 			(*pmi->texture_replace)[final_index] = tdx->isValid() ? tdx->handle : -1;
 			pmi->texture_replace->scalars[final_index] = texture_scalar();
+			pmi->texture_replace->glow_params[final_index] = texture_glow_params();
 		}
 	}
 

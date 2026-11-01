@@ -43,6 +43,7 @@ struct material_edit {
 	// what the replacement table held before the first edit, so that Reset can restore it
 	int saved_handles[TM_NUM_TYPES];
 	texture_scalar saved_scalars[TM_NUM_TYPES];
+	texture_glow_params saved_glow[TM_NUM_TYPES];
 
 	// bitmaps that the current material made for its color slots
 	SCP_vector<int> owned_color_bitmaps;
@@ -103,6 +104,7 @@ void apply_edit(material_edit& edit, polymodel_instance* pmi, int tmap_index)
 		for (int type = 0; type < TM_NUM_TYPES; type++) {
 			edit.saved_handles[type] = replace[tmap_index * TM_NUM_TYPES + type];
 			edit.saved_scalars[type] = replace.scalars[tmap_index * TM_NUM_TYPES + type];
+			edit.saved_glow[type] = replace.glow_params[tmap_index * TM_NUM_TYPES + type];
 		}
 		edit.modified = true;
 	}
@@ -125,6 +127,7 @@ void reset_edit(material_edit& edit, polymodel_instance* pmi, int tmap_index)
 		for (int type = 0; type < TM_NUM_TYPES; type++) {
 			replace[tmap_index * TM_NUM_TYPES + type] = edit.saved_handles[type];
 			replace.scalars[tmap_index * TM_NUM_TYPES + type] = edit.saved_scalars[type];
+			replace.glow_params[tmap_index * TM_NUM_TYPES + type] = edit.saved_glow[type];
 		}
 	}
 
@@ -137,7 +140,7 @@ void reset_edit(material_edit& edit, polymodel_instance* pmi, int tmap_index)
 }
 
 // Show the controls of one slot. Returns true if the user changed the slot.
-bool build_slot_editor(texture_material_slot& slot, slot_edit& state, const char* id_prefix)
+bool build_slot_editor(texture_material_slot& slot, slot_edit& state, const char* id_prefix, int type)
 {
 	bool changed = false;
 	ImGui::PushID(id_prefix);
@@ -197,6 +200,17 @@ bool build_slot_editor(texture_material_slot& slot, slot_edit& state, const char
 		}
 	}
 
+	if (type == TM_GLOW_TYPE) {
+		if (ImGui::DragFloat("Intensity", &slot.glow.intensity, 0.05f, 0.0f, 100.0f)) {
+			slot.glow.intensity = std::max(slot.glow.intensity, 0.0f);
+			changed = true;
+		}
+		if (ImGui::DragFloat("sRGB multiplier", &slot.glow.srgb_multiplier, 0.05f, 0.0f, 100.0f)) {
+			slot.glow.srgb_multiplier = std::max(slot.glow.srgb_multiplier, 0.0f);
+			changed = true;
+		}
+	}
+
 	ImGui::PopID();
 	return changed;
 }
@@ -251,7 +265,7 @@ void lab_material_editor_build(polymodel* pm, polymodel_instance* pmi)
 					sprintf(slot_id, "slot%d", entry.type);
 
 					ImGui::SeparatorText(entry.label);
-					changed |= build_slot_editor(edit.current.maps[entry.type], edit.slots[entry.type], slot_id.c_str());
+					changed |= build_slot_editor(edit.current.maps[entry.type], edit.slots[entry.type], slot_id.c_str(), entry.type);
 				}
 
 				if (changed) {

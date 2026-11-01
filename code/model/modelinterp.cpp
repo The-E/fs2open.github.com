@@ -1887,6 +1887,7 @@ void texture_info::clear()
 {
 	texture = original_texture = -1;
 	scalar = texture_scalar();
+	glow_params = texture_glow_params();
 	num_frames = 0;
 	total_time = 1.0f;
 }

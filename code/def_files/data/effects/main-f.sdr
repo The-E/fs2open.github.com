@@ -108,7 +108,8 @@ uniform modelData {
 
 	float ambientScalar;
 	float miscScalar;
-	vec2 pad1;
+	float glowIntensity;
+	float glowSrgbMultiplier;
 
 #ifdef VULKAN
 	mat4 prevModelMatrix;
@@ -477,9 +478,9 @@ void main()
 			#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_TEAMCOLOR
 		#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_MISC
 		#prereplace IF_FLAG MODEL_SDR_FLAG_HDR
-			glowColor = srgb_to_linear(glowColor) * GLOW_MAP_SRGB_MULTIPLIER;
+			glowColor = srgb_to_linear(glowColor) * glowSrgbMultiplier;
 		#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_HDR
-		emissiveColor.rgb += glowColor * GLOW_MAP_INTENSITY * glowScalar;
+		emissiveColor.rgb += glowColor * glowIntensity * glowScalar;
 	#prereplace ENDIF_FLAG //MODEL_SDR_FLAG_GLOW
 
 	#prereplace IF_FLAG MODEL_SDR_FLAG_ALPHA_MULT

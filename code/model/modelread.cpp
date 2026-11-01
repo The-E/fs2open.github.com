@@ -3267,6 +3267,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 			ti->LoadTexture(slot.file.c_str(), pm->filename);
 
 		ti->SetScalar(slot.scalar);
+		ti->SetGlowParams(slot.glow);
 	};
 
 	// load one optional map from the material

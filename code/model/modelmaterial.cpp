@@ -99,6 +99,24 @@ void parse_texture_material(const char* filename)
 				}
 			}
 
+			// the glow slot has two more settings; they stay at the defaults if the file does not set them
+			if (kw.type == TM_GLOW_TYPE) {
+				if (optional_string("+Intensity:")) {
+					stuff_float(&slot.glow.intensity);
+					if (slot.glow.intensity < 0.0f) {
+						Warning(LOCATION, "+Intensity of %s in '%s' must not be negative. The value is set to zero.", kw.keyword, filename);
+						slot.glow.intensity = 0.0f;
+					}
+				}
+				if (optional_string("+SrgbMultiplier:")) {
+					stuff_float(&slot.glow.srgb_multiplier);
+					if (slot.glow.srgb_multiplier < 0.0f) {
+						Warning(LOCATION, "+SrgbMultiplier of %s in '%s' must not be negative. The value is set to zero.", kw.keyword, filename);
+						slot.glow.srgb_multiplier = 0.0f;
+					}
+				}
+			}
+
 			if (has_color_value && !slot.file.empty()) {
 				error_display(1, "%s in '%s' has both a file name and a +Color value. Use only one. The slot is ignored.", kw.keyword, filename);
 				continue;
@@ -244,6 +262,7 @@ void texture_material_apply_replacement(model_texture_replace& dest, int tmap_in
 	if (def == nullptr) {
 		dest[base_index + slot] = new_id;
 		dest.scalars[base_index + slot] = texture_scalar();
+		dest.glow_params[base_index + slot] = texture_glow_params();
 		return;
 	}
 
@@ -281,6 +300,7 @@ void texture_material_apply_def(model_texture_replace& dest, int tmap_index, con
 
 		dest[base_index + type] = handle;
 		dest.scalars[base_index + type] = map.scalar;
+		dest.glow_params[base_index + type] = map.glow;
 	}
 }
 

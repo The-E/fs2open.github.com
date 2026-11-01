@@ -8,7 +8,8 @@ struct texture_material_slot {
 	SCP_string file;               // file name without extension; empty if the slot has no file
 	bool has_color = false;        // true if the slot is a single color
 	vec3d color = vmd_zero_vector; // red, green and blue in the range 0 to 1
-	texture_scalar scalar;         // optional change over time; only the glow slot uses it
+	texture_scalar scalar;         // optional change over time
+	texture_glow_params glow;      // only the glow slot uses it
 
 	bool empty() const { return file.empty() && !has_color; }
 };

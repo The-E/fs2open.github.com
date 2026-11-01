@@ -157,7 +157,8 @@ struct model_uniform_data {
 
 	float ambientScalar;
 	float miscScalar;
-	float pad1[2];
+	float glowIntensity;
+	float glowSrgbMultiplier;
 
 	// Only the Vulkan shaders declare these, and they're past the end of the OpenGL block.
 	matrix4 prevModelMatrix;
