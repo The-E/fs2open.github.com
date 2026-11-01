@@ -46,6 +46,7 @@
 #include "mission/missionlog.h"
 #include "mission/missionmessage.h"
 #include "mission/missionparse.h"
+#include "model/modelmaterial.h"
 #include "missioneditor/sexp_annotation_model.h"
 #include "missionui/fictionviewer.h"
 #include "missionui/missioncmdbrief.h"
@@ -5548,7 +5549,8 @@ void post_process_ships_wings()
 			}
 
 			// not found?
-			if (tr->new_texture_id < 0)
+			// (a material that a .mat file defines loads its maps when it is applied)
+			if (tr->new_texture_id < 0 && texture_material_find_real(tr->new_texture) == nullptr)
 				mprintf(("Could not load replacement texture %s for ship %s\n", tr->new_texture, p_obj.name));
 
 			// account for FRED

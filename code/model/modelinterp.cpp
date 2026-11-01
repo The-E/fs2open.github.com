@@ -1923,7 +1923,7 @@ int texture_info::LoadTexture(const char *filename, const char *dbg_name)
 // bmpman does not own the data of a bitmap that the engine creates in memory, so the engine keeps it here
 static SCP_unordered_map<int, std::unique_ptr<ubyte[]>> Color_texture_data;
 
-int texture_info::LoadColor(const vec3d &rgb, const char *dbg_name)
+int model_create_color_bitmap(const vec3d &rgb)
 {
 	constexpr int dim = 2;
 	auto data = std::make_unique<ubyte[]>(dim * dim * 4);
@@ -1939,11 +1939,37 @@ int texture_info::LoadColor(const vec3d &rgb, const char *dbg_name)
 		data[i * 4 + 3] = 255;
 	}
 
-	this->original_texture = bm_create(32, dim, dim, data.get());
+	int handle = bm_create(32, dim, dim, data.get());
+	if (handle >= 0) {
+		Color_texture_data[handle] = std::move(data);
+	}
+
+	return handle;
+}
+
+int model_get_shared_color_bitmap(const vec3d &rgb)
+{
+	// the key is the color as it is stored in the bitmap
+	const uint32_t key = ((uint32_t)fl2i(rgb.xyz.x * 255.0f + 0.5f) << 16) | ((uint32_t)fl2i(rgb.xyz.y * 255.0f + 0.5f) << 8) | (uint32_t)fl2i(rgb.xyz.z * 255.0f + 0.5f);
+	static SCP_unordered_map<uint32_t, int> shared;
+
+	auto it = shared.find(key);
+	if (it != shared.end() && bm_is_valid(it->second) && Color_texture_data.count(it->second) > 0) {
+		return it->second;
+	}
+
+	int handle = model_create_color_bitmap(rgb);
+	if (handle >= 0) {
+		shared[key] = handle;
+	}
+	return handle;
+}
+
+int texture_info::LoadColor(const vec3d &rgb, const char *dbg_name)
+{
+	this->original_texture = model_create_color_bitmap(rgb);
 	if (this->original_texture < 0) {
 		mprintf(("For \"%s\" I couldn't create a color texture\n", dbg_name));
-	} else {
-		Color_texture_data[this->original_texture] = std::move(data);
 	}
 	this->ResetTexture();
 

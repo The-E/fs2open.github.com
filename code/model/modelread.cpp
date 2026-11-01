@@ -3247,10 +3247,16 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 	texture_map *tmap = &pm->maps[i];
 	tmap->Clear();
 
-	// a .mat file for this name replaces the suffix search; empty slots in it stay empty
+	// every texture loads through a material: a .mat file, a pseudomaterial built from the image files, or,
+	// for a name that was not on disk at startup, a default material; empty slots in it stay empty
 	const texture_material_def *mat = texture_material_find(tmp_name);
-	if (mat != nullptr)
+	texture_material_def default_mat;
+	if (mat != nullptr) {
 		tmap->mat_name = mat->name;
+	} else {
+		default_mat = texture_material_make_default(tmp_name);
+		mat = &default_mat;
+	}
 
 	// load a slot of a .mat file: a single color becomes an in-memory texture, a file name loads an image
 	auto load_slot = [&](const texture_material_slot &slot, texture_info *ti) {
@@ -3262,20 +3268,10 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 		ti->SetScalar(slot.scalar);
 	};
 
-	// load one optional map, either from the .mat file or by appending the suffix to the model's texture name
+	// load one optional map from the material
 	auto load_map = [&](int type, texture_info *ti) {
-		if (mat != nullptr) {
-			ti->clear();
-			load_slot(mat->maps[type], ti);
-			return;
-		}
-
-		char map_name[MAX_FILENAME_LEN];
-		strcpy_s(map_name, file);
-		strcat_s(map_name, MODEL_TEXTURE_SUFFIXES.at(type).c_str());
-		strlwr(map_name);
-
-		ti->LoadTexture(map_name, pm->filename);
+		ti->clear();
+		load_slot(mat->maps[type], ti);
 	};
 
 	//WMC - IMPORTANT!!
@@ -3302,11 +3298,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 			tmap->is_ambient = true;
 		}
 
-		if (mat != nullptr) {
-			load_slot(mat->maps[TM_BASE_TYPE], tbase);
-		} else {
-			tbase->LoadTexture(tmp_name, pm->filename);
-		}
+		load_slot(mat->maps[TM_BASE_TYPE], tbase);
 		
 		if ( tbase->GetTexture() < 0 ) {
 			Warning(LOCATION, "Couldn't open texture '%s'\nreferenced by model '%s'\n", tmp_name, pm->filename);

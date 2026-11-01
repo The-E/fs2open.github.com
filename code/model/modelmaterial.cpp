@@ -1,5 +1,6 @@
 #include "model/modelmaterial.h"
 
+#include "bmpman/bmpman.h"
 #include "cfile/cfile.h"
 #include "parse/parselo.h"
 
@@ -135,10 +136,143 @@ void parse_texture_material(const char* filename)
 
 } // namespace
 
+// Build a material from a texture name and the map files that exist for it
+static texture_material_def make_material(const char* name, const SCP_unordered_set<SCP_string>* existing_files)
+{
+	texture_material_def def;
+	def.name = name;
+	def.maps[TM_BASE_TYPE].file = name;
+
+	for (const auto& suffix : MODEL_TEXTURE_SUFFIXES) {
+		SCP_string map_name = def.name + suffix.second;
+
+		// without a list of files, assume that every map can exist
+		if (existing_files == nullptr || existing_files->count(map_name) > 0) {
+			def.maps[suffix.first].file = std::move(map_name);
+		}
+	}
+
+	return def;
+}
+
+// Build a pseudomaterial for each texture file that the real materials do not cover
+static void build_pseudo_materials()
+{
+	// the extensions of CF_TYPE_MAPS, see cfile.cpp; .mat files are not images
+	static const char* const filters[] = { "*.pcx", "*.ani", "*.eff", "*.tga", "*.jpg", "*.png", "*.dds", "*.ktx" };
+
+	// the real materials exclude the files that they name from this pass
+	SCP_unordered_set<SCP_string> referenced;
+	for (const auto& entry : Texture_materials) {
+		for (const auto& slot : entry.second.maps) {
+			if (!slot.file.empty()) {
+				referenced.insert(slot.file);
+			}
+		}
+	}
+
+	SCP_unordered_set<SCP_string> files;
+	for (const char* filter : filters) {
+		SCP_vector<SCP_string> list;
+		cf_get_file_list(list, CF_TYPE_MAPS, filter, CF_SORT_NONE);
+
+		for (auto& name : list) {
+			std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return (char)tolower(c); });
+			files.insert(std::move(name));
+		}
+	}
+
+	size_t count = 0;
+	for (const auto& name : files) {
+		// a real material of this name replaces the files, and a real material that names the file uses it
+		if (Texture_materials.count(name) > 0 || referenced.count(name) > 0) {
+			continue;
+		}
+
+		// texture_info::LoadTexture rejects names of this length or more
+		if (name.size() + model_texture_longest_suffix().size() + 4 >= NAME_LENGTH) {
+			continue;
+		}
+
+		// a map file of another texture is part of that texture's material
+		bool is_map_file = false;
+		for (const auto& suffix : MODEL_TEXTURE_SUFFIXES) {
+			if (name.size() > suffix.second.size() && name.compare(name.size() - suffix.second.size(), SCP_string::npos, suffix.second) == 0
+				&& files.count(name.substr(0, name.size() - suffix.second.size())) > 0) {
+				is_map_file = true;
+				break;
+			}
+		}
+		if (is_map_file) {
+			continue;
+		}
+
+		auto def = make_material(name.c_str(), &files);
+		def.pseudo = true;
+		Texture_materials.emplace(name, std::move(def));
+		count++;
+	}
+
+	mprintf(("TEXTURE MATERIAL: Built %zu pseudomaterials from %zu texture files.\n", count, files.size()));
+}
+
 void texture_material_init()
 {
 	Texture_materials.clear();
 	parse_modular_table(NOX("*.mat"), parse_texture_material, CF_TYPE_MAPS);
+	build_pseudo_materials();
+}
+
+const texture_material_def* texture_material_find_real(const char* name)
+{
+	if (name == nullptr) {
+		return nullptr;
+	}
+
+	SCP_string lower_name = name;
+	std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) { return (char)tolower(c); });
+
+	auto def = texture_material_find(lower_name.c_str());
+	return (def != nullptr && !def->pseudo) ? def : nullptr;
+}
+
+void texture_material_apply_replacement(model_texture_replace& dest, int tmap_index, int slot, const char* new_name, int new_id)
+{
+	const int base_index = tmap_index * TM_NUM_TYPES;
+
+	const texture_material_def* def = (new_id == REPLACE_WITH_INVISIBLE || slot != TM_BASE_TYPE) ? nullptr : texture_material_find_real(new_name);
+	if (def == nullptr) {
+		dest[base_index + slot] = new_id;
+		dest.scalars[base_index + slot] = texture_scalar();
+		return;
+	}
+
+	for (int type = 0; type < TM_NUM_TYPES; type++) {
+		const auto& map = def->maps[type];
+		int handle;
+
+		if (map.has_color) {
+			handle = model_get_shared_color_bitmap(map.color);
+		} else if (!map.file.empty()) {
+			handle = bm_load_either(map.file.c_str());
+		} else {
+			// the new material does not define this map, so the old one must not show through
+			handle = (type == TM_BASE_TYPE) ? REPLACE_WITH_INVISIBLE : REPLACE_WITH_NO_MAP;
+		}
+
+		if (handle < 0 && handle != REPLACE_WITH_INVISIBLE && handle != REPLACE_WITH_NO_MAP) {
+			mprintf(("Could not load map %d of replacement material %s\n", type, new_name));
+			handle = (type == TM_BASE_TYPE) ? -1 : REPLACE_WITH_NO_MAP;
+		}
+
+		dest[base_index + type] = handle;
+		dest.scalars[base_index + type] = map.scalar;
+	}
+}
+
+texture_material_def texture_material_make_default(const char* name)
+{
+	return make_material(name, nullptr);
 }
 
 const texture_material_def* texture_material_find(const char* name)

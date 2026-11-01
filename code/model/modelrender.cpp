@@ -8,6 +8,7 @@
 */
 
 #include "model/modelrender.h"
+#include "model/modelmaterial.h"
 
 #include "asteroid/asteroid.h"
 #include "cmdline/cmdline.h"
@@ -343,7 +344,7 @@ void model_render_params::set_replacement_textures(int modelnum, const SCP_vecto
 
 			int tnum = tmap->FindTexture(tr.old_texture);
 			if (tnum > -1)
-				(*textures)[i * TM_NUM_TYPES + tnum] = bm_load(tr.new_texture);
+				texture_material_apply_replacement(*textures, i, tnum, tr.new_texture, bm_load(tr.new_texture));
 		}
 	}
 
@@ -1188,14 +1189,24 @@ void model_render_buffers(model_draw_list* scene, model_material *rendering_mate
 			alpha = forced_alpha;
 		}
 
-		// a .mat file can scale the contribution of each map over time; replaced and forced textures are not scaled
+		// a replacement material removes the maps that it does not define
+		if (replacement_textures != nullptr) {
+			for (int type = TM_BASE_TYPE + 1; type < TM_NUM_TYPES; type++) {
+				if ((*replacement_textures)[rt_begin_index + type] == REPLACE_WITH_NO_MAP)
+					texture_maps[type] = -1;
+			}
+		}
+
+		// a .mat file can scale the contribution of each map over time; a forced texture is not scaled
 		for (int type = 0; type < TM_NUM_TYPES; type++) {
 			bool replaced = replacement_textures != nullptr && (*replacement_textures)[rt_begin_index + type] >= 0;
 
-			if (texture_maps[type] >= 0 && !replaced && forced_texture == -2)
-				map_scalars[type] = tmap->textures[type].GetScalar().Evaluate(elapsed_time);
-			else
+			if (texture_maps[type] < 0 || forced_texture != -2)
 				map_scalars[type] = 1.0f;
+			else if (replaced)
+				map_scalars[type] = replacement_textures->scalars[rt_begin_index + type].Evaluate(elapsed_time);
+			else
+				map_scalars[type] = tmap->textures[type].GetScalar().Evaluate(elapsed_time);
 		}
 
 		if ( (texture_maps[TM_BASE_TYPE] == -1) && !no_texturing && !(debug_flags & MR_DEBUG_NO_DIFFUSE) ) {
@@ -3145,7 +3156,7 @@ void modelinstance_replace_active_texture(polymodel_instance* pmi, const char* o
 			pmi->texture_replace = std::make_shared<model_texture_replace>();
 		}
 
-		(*pmi->texture_replace)[final_index] = texture;
+		texture_material_apply_replacement(*pmi->texture_replace, final_index / TM_NUM_TYPES, final_index % TM_NUM_TYPES, new_name, texture);
 	} else
 		Warning(LOCATION, "Invalid texture '%s' used for replacement texture", old_name);
 }

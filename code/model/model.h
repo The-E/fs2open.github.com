@@ -188,16 +188,53 @@ inline const SCP_string& model_texture_longest_suffix() {
 
 #define MAX_REPLACEMENT_TEXTURES MAX_MODEL_TEXTURES * TM_NUM_TYPES
 
+// A scalar that changes with time. A texture slot uses it to scale its contribution when the model is drawn.
+struct texture_scalar {
+	enum class Type { None, Sine };
+
+	Type type = Type::None;
+	float period = 1.0f;	// in seconds; used by Sine
+
+	// the value is in the range 0 to 1; elapsed_ms is in milliseconds
+	float Evaluate(int elapsed_ms) const
+	{
+		switch (type) {
+		case Type::Sine: {
+			// a period of zero or less is rejected when the .mat file is parsed
+			float phase = fmodf(elapsed_ms / (period * 1000.0f), 1.0f);
+			return 0.5f + 0.5f * sinf(phase * PI2);
+		}
+		default:
+			return 1.0f;
+		}
+	}
+};
+
 // Goober5000 - since we need something < 0
 #define REPLACE_WITH_INVISIBLE	-47
 
+// Replace a map other than the diffuse map with no map at all. A replacement material uses this
+// for a map that it does not define.
+#define REPLACE_WITH_NO_MAP		-48
+
 class model_texture_replace : public std::array<int, MAX_REPLACEMENT_TEXTURES> {
 public:
+	// the optional change over time of each replacement map, set when a material replaces the map
+	std::array<texture_scalar, MAX_REPLACEMENT_TEXTURES> scalars;
+
 	model_texture_replace() : std::array<int, MAX_REPLACEMENT_TEXTURES>() {
 		for (int& tex : *this)
 			tex = -1;
 	}
 };
+
+// Create a 2x2 bitmap of one color in memory; rgb is in the range 0 to 1. The engine keeps the pixel data.
+// Returns the bitmap handle, or -1 on failure. texture_info::PageOut(true) frees the data of a bitmap that it holds.
+int model_create_color_bitmap(const vec3d &rgb);
+
+// Like model_create_color_bitmap, but equal colors share one bitmap that lives until the engine shuts down.
+// Nothing may release the bitmap. Use it for replacement textures, which no texture_info owns.
+int model_get_shared_color_bitmap(const vec3d &rgb);
 
 // Data specific to a particular instance of a model.
 struct polymodel_instance
@@ -782,28 +819,6 @@ typedef struct insignia {
 #define PM_FLAG_TRANS_BUFFER			(1<<2)					// render transparency buffer
 #define PM_FLAG_BATCHED					(1<<3)					// this model can be batch rendered
 #define PM_FLAG_HAS_INTRINSIC_MOTION	(1<<4)					// whether this model has an intrinsic rotation or translation submodel somewhere
-
-// A scalar that changes with time. A texture slot uses it to scale its contribution when the model is drawn.
-struct texture_scalar {
-	enum class Type { None, Sine };
-
-	Type type = Type::None;
-	float period = 1.0f;	// in seconds; used by Sine
-
-	// the value is in the range 0 to 1; elapsed_ms is in milliseconds
-	float Evaluate(int elapsed_ms) const
-	{
-		switch (type) {
-		case Type::Sine: {
-			// a period of zero or less is rejected when the .mat file is parsed
-			float phase = fmodf(elapsed_ms / (period * 1000.0f), 1.0f);
-			return 0.5f + 0.5f * sinf(phase * PI2);
-		}
-		default:
-			return 1.0f;
-		}
-	}
-};
 
 // Goober5000
 class texture_info

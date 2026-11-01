@@ -53,6 +53,7 @@
 #include "missionui/redalert.h"
 #include "mod_table/mod_table.h"
 #include "model/model.h"
+#include "model/modelmaterial.h"
 #include "model/modelrender.h"
 #include "model/modelreplace.h"
 #include "model/animation/modelanimation_driver.h"
@@ -7199,7 +7200,7 @@ void ship::apply_replacement_textures(const SCP_vector<texture_replace> &replace
 
 			int tnum = tmap->FindTexture(tr.old_texture);
 			if (tnum > -1)
-				(*pmi->texture_replace)[j * TM_NUM_TYPES + tnum] = tr.new_texture_id;
+				texture_material_apply_replacement(*pmi->texture_replace, j, tnum, tr.new_texture, tr.new_texture_id);
 		}
 	}
 }
@@ -11806,10 +11807,10 @@ static void ship_model_change(int n, int ship_type)
 				int tnum = tmap->FindTexture(tr.old_texture);
 
 				if (tnum > -1) {
-					// load new texture
+					// load new texture; a material of the new name can load its own maps
 					int new_tex = bm_load_either(tr.new_texture);
-					if (new_tex > -1) {
-						texture_replace_deref[j * TM_NUM_TYPES + tnum] = new_tex;
+					if (new_tex > -1 || texture_material_find_real(tr.new_texture) != nullptr) {
+						texture_material_apply_replacement(texture_replace_deref, j, tnum, tr.new_texture, new_tex);
 					}
 				}
 			}
