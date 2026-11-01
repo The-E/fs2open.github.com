@@ -247,12 +247,26 @@ void texture_material_apply_replacement(model_texture_replace& dest, int tmap_in
 		return;
 	}
 
+	texture_material_apply_def(dest, tmap_index, *def, nullptr);
+}
+
+void texture_material_apply_def(model_texture_replace& dest, int tmap_index, const texture_material_def& def, SCP_vector<int>* owned_color_bitmaps)
+{
+	const int base_index = tmap_index * TM_NUM_TYPES;
+
 	for (int type = 0; type < TM_NUM_TYPES; type++) {
-		const auto& map = def->maps[type];
+		const auto& map = def.maps[type];
 		int handle;
 
 		if (map.has_color) {
-			handle = model_get_shared_color_bitmap(map.color);
+			if (owned_color_bitmaps != nullptr) {
+				handle = model_create_color_bitmap(map.color);
+				if (handle >= 0) {
+					owned_color_bitmaps->push_back(handle);
+				}
+			} else {
+				handle = model_get_shared_color_bitmap(map.color);
+			}
 		} else if (!map.file.empty()) {
 			handle = bm_load_either(map.file.c_str());
 		} else {
@@ -261,7 +275,7 @@ void texture_material_apply_replacement(model_texture_replace& dest, int tmap_in
 		}
 
 		if (handle < 0 && handle != REPLACE_WITH_INVISIBLE && handle != REPLACE_WITH_NO_MAP) {
-			mprintf(("Could not load map %d of replacement material %s\n", type, new_name));
+			mprintf(("Could not load map %d of replacement material %s\n", type, def.name.c_str()));
 			handle = (type == TM_BASE_TYPE) ? -1 : REPLACE_WITH_NO_MAP;
 		}
 

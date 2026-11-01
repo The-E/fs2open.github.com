@@ -8,6 +8,7 @@
 #include "graphics/debug_sphere.h"
 #include "graphics/matrix.h"
 #include "graphics/shadows.h"
+#include "lab/dialogs/lab_material_editor.h"
 #include "lab/labv2_internal.h"
 #include "lighting/lighting_profiles.h"
 #include "ship/shiphit.h"
@@ -62,6 +63,8 @@ std::array<bool, MAX_SHIP_SECONDARY_BANKS> triggered_secondary_banks = {false, f
 void LabUi::object_changed()
 {
 	rebuild_after_object_change = true;
+
+	lab_material_editor_reset();
 
 	manual_animation_triggers.clear();
 
@@ -1730,6 +1733,8 @@ void LabUi::show_object_options() const
 				build_ship_table_info_txtbox(sip);
 
 				build_model_info_box(sip, pm);
+
+				lab_material_editor_build(pm, model_get_instance(shipp->model_instance_num));
 
 				build_subsystem_list(objp, shipp);
 			}

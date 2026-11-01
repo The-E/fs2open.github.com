@@ -3246,6 +3246,7 @@ void model_load_texture(polymodel *pm, int i, const char *file)
 
 	texture_map *tmap = &pm->maps[i];
 	tmap->Clear();
+	tmap->name = tmp_name;
 
 	// every texture loads through a material: a .mat file, a pseudomaterial built from the image files, or,
 	// for a name that was not on disk at startup, a default material; empty slots in it stay empty

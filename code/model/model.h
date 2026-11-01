@@ -232,6 +232,9 @@ public:
 // Returns the bitmap handle, or -1 on failure. texture_info::PageOut(true) frees the data of a bitmap that it holds.
 int model_create_color_bitmap(const vec3d &rgb);
 
+// Release a bitmap that model_create_color_bitmap made, and free its pixel data. Nothing may use the handle afterward.
+void model_release_color_bitmap(int handle);
+
 // Like model_create_color_bitmap, but equal colors share one bitmap that lives until the engine shuts down.
 // Nothing may release the bitmap. Use it for replacement textures, which no texture_info owns.
 int model_get_shared_color_bitmap(const vec3d &rgb);
@@ -867,6 +870,9 @@ public:
 
 	bool is_ambient;
 	bool is_transparent;
+
+	// name of the model texture, as the model file has it, in lowercase
+	SCP_string name;
 
 	// name of the .mat file that defined these textures; empty if the textures came from the suffix search
 	SCP_string mat_name;

@@ -1947,6 +1947,16 @@ int model_create_color_bitmap(const vec3d &rgb)
 	return handle;
 }
 
+void model_release_color_bitmap(int handle)
+{
+	if (handle < 0) {
+		return;
+	}
+
+	bm_release(handle);
+	Color_texture_data.erase(handle);
+}
+
 int model_get_shared_color_bitmap(const vec3d &rgb)
 {
 	// the key is the color as it is stored in the bitmap
@@ -2079,6 +2089,7 @@ void texture_map::Clear()
 {
 	is_ambient = false;
 	is_transparent = false;
+	name.clear();
 	mat_name.clear();
 
 	for(int i = 0; i < TM_NUM_TYPES; i++)

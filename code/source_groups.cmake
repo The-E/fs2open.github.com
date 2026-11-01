@@ -785,6 +785,8 @@ add_file_folder("Lab"
 
 add_file_folder("Lab\\\\Dialogs"
 	lab/dialogs/lab_ui.h
+	lab/dialogs/lab_material_editor.cpp
+	lab/dialogs/lab_material_editor.h
 	lab/dialogs/lab_ui.cpp
 	lab/dialogs/lab_ui_helpers.h
 	lab/dialogs/lab_ui_helpers.cpp

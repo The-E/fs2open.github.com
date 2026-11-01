@@ -48,3 +48,9 @@ const texture_material_def* texture_material_find_real(const char* name);
 // maps of the model texture: a map that the material does not define is removed, and a color or scalar of the
 // material applies. In every other case only the matched slot changes, to new_id.
 void texture_material_apply_replacement(model_texture_replace& dest, int tmap_index, int slot, const char* new_name, int new_id);
+
+// Put every map of a material into a model_texture_replace, as texture_material_apply_replacement does for a real
+// material. The material does not have to be in the table of materials.
+// If owned_color_bitmaps is not null, a color slot gets its own bitmap, and the handle is added to the list.
+// The caller must release these with model_release_color_bitmap when nothing uses them. Otherwise the colors share bitmaps.
+void texture_material_apply_def(model_texture_replace& dest, int tmap_index, const texture_material_def& def, SCP_vector<int>* owned_color_bitmaps = nullptr);
