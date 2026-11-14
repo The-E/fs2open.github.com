@@ -25,11 +25,12 @@ const slot_label Slot_labels[] = {
 enum class slot_source : int { None, File, Color };
 
 const char* const Source_names[] = { "None", "File", "Color" };
-const char* const Scalar_names[] = { "None", "Sine" };
+const char* const Scalar_names[] = { "None", "Sine", "Cosine", "RampUp", "RampDown", "Blink", "Quake" };
 
 // The edit state of one slot. The text buffer holds the file name while the user types.
 struct slot_edit {
 	char file_buffer[NAME_LENGTH] = "";
+	char pattern_buffer[65] = "m";
 };
 
 // The edit state of one material of the model
@@ -88,6 +89,7 @@ void init_edit(material_edit& edit, polymodel* pm, int tmap_index)
 	edit.current = edit.original;
 	for (int type = 0; type < TM_NUM_TYPES; type++) {
 		strcpy_s(edit.slots[type].file_buffer, edit.current.maps[type].file.c_str());
+		strcpy_s(edit.slots[type].pattern_buffer, edit.current.maps[type].scalar.pattern.empty() ? "m" : edit.current.maps[type].scalar.pattern.c_str());
 	}
 	edit.initialized = true;
 }
@@ -136,6 +138,7 @@ void reset_edit(material_edit& edit, polymodel_instance* pmi, int tmap_index)
 	edit.current = edit.original;
 	for (int type = 0; type < TM_NUM_TYPES; type++) {
 		strcpy_s(edit.slots[type].file_buffer, edit.current.maps[type].file.c_str());
+		strcpy_s(edit.slots[type].pattern_buffer, edit.current.maps[type].scalar.pattern.empty() ? "m" : edit.current.maps[type].scalar.pattern.c_str());
 	}
 }
 
@@ -190,14 +193,58 @@ bool build_slot_editor(texture_material_slot& slot, slot_edit& state, const char
 	int scalar_type = static_cast<int>(slot.scalar.type);
 	if (ImGui::Combo("Scalar type", &scalar_type, Scalar_names, IM_ARRAYSIZE(Scalar_names))) {
 		slot.scalar.type = static_cast<texture_scalar::Type>(scalar_type);
+		if (slot.scalar.type == texture_scalar::Type::Quake) {
+			slot.scalar.pattern = state.pattern_buffer;
+		}
 		changed = true;
 	}
 
-	if (slot.scalar.type == texture_scalar::Type::Sine) {
-		if (ImGui::DragFloat("Period (seconds)", &slot.scalar.period, 0.1f, 0.01f, 600.0f)) {
-			slot.scalar.period = std::max(slot.scalar.period, 0.01f);
+	auto seconds = [&](const char* label, float& value) {
+		if (ImGui::DragFloat(label, &value, 0.1f, 0.01f, 600.0f)) {
+			value = std::max(value, 0.01f);
 			changed = true;
 		}
+	};
+
+	switch (slot.scalar.type) {
+	case texture_scalar::Type::Sine:
+	case texture_scalar::Type::Cosine:
+		seconds("Period (seconds)", slot.scalar.period);
+		break;
+	case texture_scalar::Type::RampUp:
+	case texture_scalar::Type::RampDown:
+		seconds("Period (seconds)", slot.scalar.period);
+		changed |= ImGui::DragFloat("Start", &slot.scalar.start, 0.01f);
+		changed |= ImGui::DragFloat("End", &slot.scalar.end, 0.01f);
+		changed |= ImGui::Checkbox("Repeats", &slot.scalar.repeats);
+		break;
+	case texture_scalar::Type::Blink:
+		seconds("On period (seconds)", slot.scalar.on_period);
+		seconds("Off period (seconds)", slot.scalar.off_period);
+		break;
+	case texture_scalar::Type::Quake:
+		// the pattern applies when the user leaves the field; only the letters a to z are valid
+		ImGui::InputText("Pattern", state.pattern_buffer, IM_ARRAYSIZE(state.pattern_buffer));
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			SCP_string pattern;
+			for (const char* c = state.pattern_buffer; *c != '\0'; c++) {
+				char lower = (char)tolower((unsigned char)*c);
+				if (lower >= 'a' && lower <= 'z')
+					pattern += lower;
+			}
+			if (pattern.empty())
+				pattern = "m";
+			strcpy_s(state.pattern_buffer, pattern.c_str());
+			slot.scalar.pattern = pattern;
+			changed = true;
+		}
+		if (ImGui::DragFloat("Speed", &slot.scalar.speed, 0.05f, 0.01f, 100.0f)) {
+			slot.scalar.speed = std::max(slot.scalar.speed, 0.01f);
+			changed = true;
+		}
+		break;
+	default:
+		break;
 	}
 
 	if (type == TM_GLOW_TYPE) {

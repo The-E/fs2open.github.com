@@ -189,24 +189,60 @@ inline const SCP_string& model_texture_longest_suffix() {
 #define MAX_REPLACEMENT_TEXTURES MAX_MODEL_TEXTURES * TM_NUM_TYPES
 
 // A scalar that changes with time. A texture slot uses it to scale its contribution when the model is drawn.
+// The value of most types is in the range 0 to 1. A Quake pattern can give a value up to 25/12.
 struct texture_scalar {
-	enum class Type { None, Sine };
+	enum class Type { None, Sine, Cosine, RampUp, RampDown, Blink, Quake };
 
 	Type type = Type::None;
-	float period = 1.0f;	// in seconds; used by Sine
+	float period = 1.0f;		// in seconds; used by Sine, Cosine, RampUp and RampDown
+	float start = 0.0f;			// RampUp and RampDown: the low end of the ramp
+	float end = 1.0f;			// RampUp and RampDown: the high end of the ramp
+	bool repeats = true;		// RampUp and RampDown: if false, the ramp plays once and then holds its last value
+	float on_period = 1.0f;		// in seconds; used by Blink
+	float off_period = 1.0f;	// in seconds; used by Blink
+	SCP_string pattern;			// Quake: the letters of a lightstyle, from 'a' (dark) to 'z' (bright); 'm' is normal
+	float speed = 1.0f;			// Quake: the pattern runs at 10 letters each second, multiplied by this value
 
-	// the value is in the range 0 to 1; elapsed_ms is in milliseconds
+	// elapsed_ms is in milliseconds
+	// The parser of the .mat file rejects a period of zero or less, and an empty pattern
 	float Evaluate(int elapsed_ms) const
 	{
 		switch (type) {
-		case Type::Sine: {
-			// a period of zero or less is rejected when the .mat file is parsed
-			float phase = fmodf(elapsed_ms / (period * 1000.0f), 1.0f);
-			return 0.5f + 0.5f * sinf(phase * PI2);
+		case Type::Sine:
+			return 0.5f + 0.5f * sinf(Phase(elapsed_ms, period) * PI2);
+		case Type::Cosine:
+			return 0.5f - 0.5f * cosf(Phase(elapsed_ms, period) * PI2);
+		case Type::RampUp:
+			return start + (end - start) * RampPhase(elapsed_ms);
+		case Type::RampDown:
+			return end + (start - end) * RampPhase(elapsed_ms);
+		case Type::Blink: {
+			float cycle = (on_period + off_period) * 1000.0f;
+			float t = fmodf((float)elapsed_ms, cycle);
+			return (t < on_period * 1000.0f) ? 1.0f : 0.0f;
+		}
+		case Type::Quake: {
+			if (pattern.empty())
+				return 1.0f;
+			auto index = static_cast<size_t>(std::max(0.0f, elapsed_ms * 0.001f * 10.0f * speed)) % pattern.size();
+			return (pattern[index] - 'a') / 12.0f;
 		}
 		default:
 			return 1.0f;
 		}
+	}
+
+private:
+	// the phase of a ramp; a ramp that does not repeat stops at 1
+	float RampPhase(int elapsed_ms) const
+	{
+		return repeats ? Phase(elapsed_ms, period) : std::min(elapsed_ms / (period * 1000.0f), 1.0f);
+	}
+
+	// the part of the current period that is gone, in the range 0 to 1
+	static float Phase(int elapsed_ms, float period_seconds)
+	{
+		return fmodf(elapsed_ms / (period_seconds * 1000.0f), 1.0f);
 	}
 };
 

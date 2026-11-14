@@ -27,6 +27,77 @@ const mat_keyword Mat_keywords[] = {
 
 SCP_unordered_map<SCP_string, texture_material_def> Texture_materials;
 
+// Read the type name and the keys of a scalar. The function reads all keys of the type, also when one is not valid.
+// If a key is not valid, the scalar stays at None.
+void parse_scalar(texture_scalar& scalar, const char* keyword, const char* filename)
+{
+	SCP_string type_name;
+	stuff_string(type_name, F_NAME);
+
+	texture_scalar result;
+	bool valid = true;
+
+	auto read_period = [&](const char* key, float& value) {
+		value = 0.0f;
+		if (optional_string(key)) {
+			stuff_float(&value);
+		}
+		if (value <= 0.0f) {
+			error_display(1, "ScalarType %s of %s in '%s' needs %s greater than zero. The scalar is ignored.", type_name.c_str(), keyword, filename, key);
+			valid = false;
+		}
+	};
+
+	if (!stricmp(type_name.c_str(), "Sine") || !stricmp(type_name.c_str(), "Cosine")) {
+		result.type = !stricmp(type_name.c_str(), "Sine") ? texture_scalar::Type::Sine : texture_scalar::Type::Cosine;
+		read_period("+Period:", result.period);
+	} else if (!stricmp(type_name.c_str(), "RampUp") || !stricmp(type_name.c_str(), "RampDown")) {
+		result.type = !stricmp(type_name.c_str(), "RampUp") ? texture_scalar::Type::RampUp : texture_scalar::Type::RampDown;
+		read_period("+Period:", result.period);
+		if (optional_string("+Start:")) {
+			stuff_float(&result.start);
+		}
+		if (optional_string("+End:")) {
+			stuff_float(&result.end);
+		}
+		if (optional_string("+Repeats:")) {
+			stuff_boolean(&result.repeats);
+		}
+	} else if (!stricmp(type_name.c_str(), "Blink")) {
+		result.type = texture_scalar::Type::Blink;
+		read_period("+OnPeriod:", result.on_period);
+		read_period("+OffPeriod:", result.off_period);
+	} else if (!stricmp(type_name.c_str(), "Quake")) {
+		result.type = texture_scalar::Type::Quake;
+
+		if (optional_string("+Pattern:")) {
+			stuff_string(result.pattern, F_NAME);
+		}
+		if (optional_string("+Speed:")) {
+			stuff_float(&result.speed);
+		}
+
+		std::transform(result.pattern.begin(), result.pattern.end(), result.pattern.begin(), [](unsigned char c) { return (char)tolower(c); });
+		bool letters = std::all_of(result.pattern.begin(), result.pattern.end(), [](char c) { return c >= 'a' && c <= 'z'; });
+
+		if (result.pattern.empty() || !letters) {
+			error_display(1, "ScalarType Quake of %s in '%s' needs a +Pattern of the letters a to z. The scalar is ignored.", keyword, filename);
+			valid = false;
+		}
+		if (result.speed <= 0.0f) {
+			error_display(1, "ScalarType Quake of %s in '%s' needs a +Speed greater than zero. The scalar is ignored.", keyword, filename);
+			valid = false;
+		}
+	} else {
+		error_display(1, "Unknown ScalarType '%s' of %s in '%s'. The scalar is ignored.", type_name.c_str(), keyword, filename);
+		valid = false;
+	}
+
+	if (valid) {
+		scalar = std::move(result);
+	}
+}
+
 void parse_texture_material(const char* filename)
 {
 	try {
@@ -75,24 +146,7 @@ void parse_texture_material(const char* filename)
 
 			// an optional scalar changes the slot with time; the keys that follow +ScalarType belong to its type
 			if (optional_string("+ScalarType:")) {
-				SCP_string type_name;
-				stuff_string(type_name, F_NAME);
-
-				if (!stricmp(type_name.c_str(), "Sine")) {
-					float period = 0.0f;
-					if (optional_string("+Period:")) {
-						stuff_float(&period);
-					}
-
-					if (period > 0.0f) {
-						slot.scalar.type = texture_scalar::Type::Sine;
-						slot.scalar.period = period;
-					} else {
-						error_display(1, "ScalarType Sine of %s in '%s' needs a +Period greater than zero. The scalar is ignored.", kw.keyword, filename);
-					}
-				} else {
-					error_display(1, "Unknown ScalarType '%s' of %s in '%s'. The scalar is ignored.", type_name.c_str(), kw.keyword, filename);
-				}
+				parse_scalar(slot.scalar, kw.keyword, filename);
 
 				if (slot.scalar.type != texture_scalar::Type::None && kw.type == TM_HEIGHT_TYPE) {
 					Warning(LOCATION, "ScalarType of %s in '%s' has no effect. The model shader does not use a height map.", kw.keyword, filename);
